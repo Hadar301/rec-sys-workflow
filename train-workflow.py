@@ -4,9 +4,7 @@ import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model
 
-@dsl.component(
-    base_image="registry.access.redhat.com/ubi9/python-311",
-    packages_to_install=["feast[postgres]>=0.46.0"],)
+@dsl.component(base_image="quay.io/ecosystem-appeng/rec-sys-app",)
 def generate_candidates(item_input_model: Input[Model], user_input_model: Input[Model], item_df_input: Input[Dataset], user_df_input: Input[Dataset]):
     from feast import FeatureStore
     from feast.data_source import PushMode
@@ -69,9 +67,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE)
 
 
-@dsl.component(
-    base_image="registry.access.redhat.com/ubi9/python-311", # TODO change image to repo with models
-    packages_to_install=[""],)
+@dsl.component(base_image="quay.io/ecosystem-appeng/rec-sys-app")
 def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], interaction_df_input: Input[Dataset], item_output_model: Output[Model], user_output_model: Output[Model]):
     from models.two_tower import TwoTowerModel
     from models.user_tower import UserTower
@@ -97,8 +93,8 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
     
 
 @dsl.component(
-    base_image="registry.access.redhat.com/ubi9/python-311", #TODO change image to rec-sys-feast-repository
-    packages_to_install=["feast[postgres]>=0.46.0, pandas"],)
+    base_image="quay.io/ecosystem-appeng/rec-sys-app") #TODO change image to rec-sys-feast-repository
+    # packages_to_install=["feast[postgres]>=0.46.0","pandas"],)
 def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output[Dataset], interaction_df_output: Output[Dataset]):
     from feast import FeatureStore
     from datetime import datetime, timedelta
@@ -157,17 +153,17 @@ def batch_recommendation():
     load_data_task.set_caching_options(False)
     
     train_model_task = train_model(
-        load_data_task.outputs['item_df_output'],
-        load_data_task.outputs['user_df_output'],
-        load_data_task.outputs['interaction_df_output']
+        item_df_input=load_data_task.outputs['item_df_output'],
+        user_df_input=load_data_task.outputs['user_df_output'],
+        interaction_df_input=load_data_task.outputs['interaction_df_output']
     ).after(load_data_task)
     train_model_task.set_caching_options(False)
     
     generate_candidates_task = generate_candidates(
-        train_model_task.outputs['item_output_model'],
-        train_model_task.outputs['user_output_model'],
-        load_data_task.outputs['item_df_output'],
-        load_data_task.outputs['user_df_output'],
+        item_input_model=train_model_task.outputs['item_output_model'],
+        user_input_model=train_model_task.outputs['user_output_model'],
+        item_df_input=load_data_task.outputs['item_df_output'],
+        user_df_input=load_data_task.outputs['user_df_output'],
     ).after(train_model_task)
     generate_candidates_task.set_caching_options(False)
 
