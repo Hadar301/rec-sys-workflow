@@ -4,10 +4,11 @@ import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model
 
-# IMAGE_TAG = '0.0.11'
-IMAGE_TAG = 'latest'
+IMAGE_TAG = '0.0.13'
+# IMAGE_TAG = 'latest'
 
-@dsl.component(base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}",)
+@dsl.component(
+    base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}", packages_to_install=['grpcio'])
 def generate_candidates(item_input_model: Input[Model], user_input_model: Input[Model], item_df_input: Input[Dataset], user_df_input: Input[Dataset]):
     from feast import FeatureStore
     from feast.data_source import PushMode
@@ -54,17 +55,20 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     store.materialize_incremental(datetime.now(), feature_views=['item_embedding'])
 
     # Calculate user recommendations for each user
+    item_embedding_view = 'item_embedding'
     k = 64
-    item_recommendation = []
-    for user_embed in user_embed_df['embedding']:
-        item_recommendation.append(
-            store.retrieve_online_documents(
-                query=user_embed,
-                top_k=k,
-                feature=f'item_embedding:item_id'
-            ).to_df()
-        )
-    item_recommendation = [np.random.randint(0, len(user_embed_df), k).tolist()] *len(user_embed_df)
+    # # Feast have bug here need to be fixed
+    # item_recommendation = []
+    # for user_embed in user_embed_df['embedding']:
+    #     item_recommendation.append(
+    #         store.retrieve_online_documents(
+    #             query=user_embed,
+    #             top_k=k,
+    #             features=[f'{item_embedding_view}:item_id', f'{item_embedding_view}:embeddings']
+    #         ).to_df()
+    #     )
+    item_recommendation = [np.random.randint(0, len(user_embed_df), k).tolist()] *len (user_embed_df)
+
     # Pushing the calculated items to the online store
     user_items_df = user_embed_df[['user_id']].copy()
     user_items_df['event_timestamp'] = datetime.now()

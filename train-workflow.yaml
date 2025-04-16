@@ -86,8 +86,9 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
-          $0\" \"$@\"\n"
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'grpcio' &&\
+          \ \"$0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -123,17 +124,19 @@ deploymentSpec:
           \ item_embed_df, to=PushMode.ONLINE)\n    store.push('user_embed_push_source',\
           \ user_embed_df, to=PushMode.ONLINE)\n\n    # Materilize the online store\n\
           \    store.materialize_incremental(datetime.now(), feature_views=['item_embedding'])\n\
-          \n    # Calculate user recommendations for each user\n    k = 64\n    item_recommendation\
-          \ = []\n    for user_embed in user_embed_df['embedding']:\n        item_recommendation.append(\n\
-          \            store.retrieve_online_documents(\n                query=user_embed,\n\
-          \                top_k=k,\n                feature=f'item_embedding:item_id'\n\
-          \            ).to_df()\n        )\n    item_recommendation = [np.random.randint(0,\
-          \ len(user_embed_df), k).tolist()] *len(user_embed_df)\n    # Pushing the\
-          \ calculated items to the online store\n    user_items_df = user_embed_df[['user_id']].copy()\n\
+          \n    # Calculate user recommendations for each user\n    item_embedding_view\
+          \ = 'item_embedding'\n    k = 64\n    # # Feast have bug here need to be\
+          \ fixed\n    # item_recommendation = []\n    # for user_embed in user_embed_df['embedding']:\n\
+          \    #     item_recommendation.append(\n    #         store.retrieve_online_documents(\n\
+          \    #             query=user_embed,\n    #             top_k=k,\n    #\
+          \             features=[f'{item_embedding_view}:item_id', f'{item_embedding_view}:embeddings']\n\
+          \    #         ).to_df()\n    #     )\n    item_recommendation = [np.random.randint(0,\
+          \ len(user_embed_df), k).tolist()] *len (user_embed_df)\n\n    # Pushing\
+          \ the calculated items to the online store\n    user_items_df = user_embed_df[['user_id']].copy()\n\
           \    user_items_df['event_timestamp'] = datetime.now()\n    user_items_df['top_k_item_ids']\
           \ = item_recommendation\n\n    store.push('user_items_push_source', user_items_df,\
           \ to=PushMode.ONLINE)\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:latest
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.13
     exec-load-data-from-feast:
       container:
         args:
@@ -194,7 +197,7 @@ deploymentSpec:
           \n    item_df_output.metadata['format'] = 'parquet'\n    user_df_output.metadata['format']\
           \ = 'parquet'\n    interaction_df_output.metadata['format'] = 'parquet'\n\
           \    neg_interaction_df_output.metadata['format'] = 'parquet'\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:latest
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.13
     exec-train-model:
       container:
         args:
@@ -236,7 +239,7 @@ deploymentSpec:
           \ torch.save(user_encoder.state_dict(), user_output_model.path)\n    item_output_model.metadata['framework']\
           \ = 'pytorch'\n    user_output_model.metadata['framework'] = 'pytorch'\n\
           \n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:latest
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.13
 pipelineInfo:
   name: train-workflow
 root:
