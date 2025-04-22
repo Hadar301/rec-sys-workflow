@@ -52,7 +52,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     store.push('user_embed_push_source', user_embed_df, to=PushMode.ONLINE)
     
     # Materilize the online store
-    store.materialize_incremental(datetime.now(), feature_views=['item_embedding'])
+    store.materialize_incremental(datetime.now(), feature_views=['item_embedding', 'user_items', 'item_features'])
 
     # Calculate user recommendations for each user
     item_embedding_view = 'item_embedding'
