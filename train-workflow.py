@@ -19,10 +19,6 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     import numpy as np
     from datetime import datetime
     import torch
-    import os
-    print('WOWOWWO')
-    print(os.listdir('.'))
-    print(os.listdir('feature_repo/'))
     store = FeatureStore(repo_path="feature_repo/")
     
     item_encoder = ItemTower()
@@ -57,17 +53,16 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     # Calculate user recommendations for each user
     item_embedding_view = 'item_embedding'
     k = 64
-    # # Feast have bug here need to be fixed
-    # item_recommendation = []
-    # for user_embed in user_embed_df['embedding']:
-    #     item_recommendation.append(
-    #         store.retrieve_online_documents(
-    #             query=user_embed,
-    #             top_k=k,
-    #             features=[f'{item_embedding_view}:item_id', f'{item_embedding_view}:embeddings']
-    #         ).to_df()
-    #     )
-    item_recommendation = [np.random.randint(0, len(user_embed_df), k).tolist()] *len (user_embed_df)
+    item_recommendation = []
+    for user_embed in user_embed_df['embedding']:
+        item_recommendation.append(
+            store.retrieve_online_documents(
+                query=user_embed,
+                top_k=k,
+                features=[f'{item_embedding_view}:item_id']
+                # features=[f'{item_embedding_view}:item_id', f'{item_embedding_view}:embeddings']
+            ).to_df()['item_id'].to_list()
+        )
 
     # Pushing the calculated items to the online store
     user_items_df = user_embed_df[['user_id']].copy()
@@ -101,15 +96,14 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
     user_output_model.metadata['framework'] = 'pytorch'
     
 @dsl.component(
-    base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}", packages_to_install=['grpcio'])
+    base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}", packages_to_install=['grpcio', 'psycopg2'])
 def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output[Dataset], interaction_df_output: Output[Dataset], neg_interaction_df_output: Output[Dataset]):
     from feast import FeatureStore
     from datetime import datetime
     import pandas as pd
     import os
-    print('WOWOWWO')
-    print(os.listdir('.'))
-    print(os.listdir('feature_repo/'))
+    import psycopg2
+    from sqlalchemy import create_engine
     store = FeatureStore(repo_path="feature_repo/")
     # load feature services
     item_service = store.get_feature_service("item_service")
@@ -149,6 +143,21 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     interaction_df = store.get_historical_features(entity_df=item_user_interactions_df, features=interaction_service).to_df()
     neg_interaction_df = store.get_historical_features(entity_df=item_user_neg_interactions_df, features=neg_interactions_service).to_df()
     
+    uri = os.getenv('uri', None)
+    engine = create_engine(uri)
+
+    # Query the table into a pandas DataFrame
+    query_negative = 'SELECT * FROM stream_interaction_negetive'
+    query_positive = 'SELECT * FROM stream_interaction_positive'
+    # query_negative = 'SELECT * FROM stream_negative_interaction'
+    # query_positive = 'SELECT * FROM stream_positive_interaction'
+    stream_positive_inter_df = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})
+    stream_negetive_inter_df = pd.read_sql(query_negative, engine).rename(columns={'timestamp':'event_timestamp'})
+    print(f'count_before: {len(interaction_df)}')
+    interaction_df = pd.concat([interaction_df, stream_positive_inter_df], axis=0)
+    neg_interaction_df = pd.concat([neg_interaction_df, stream_negetive_inter_df], axis=0)
+    print(f'count_after: {len(interaction_df)}')
+    
     # Pass artifacts
     item_df.to_parquet(item_df_output.path)
     user_df.to_parquet(user_df_output.path)
@@ -165,6 +174,11 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
 def batch_recommendation():
     
     load_data_task = load_data_from_feast()
+    kubernetes.use_secret_as_env(
+        task=load_data_task,
+        secret_name='cluster-sample-app',
+        secret_key_to_env={'uri': 'uri'},
+    )
     # Component configurations
     load_data_task.set_caching_options(False)
     
