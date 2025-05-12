@@ -153,10 +153,10 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     # query_positive = 'SELECT * FROM stream_positive_interaction'
     stream_positive_inter_df = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})
     stream_negetive_inter_df = pd.read_sql(query_negative, engine).rename(columns={'timestamp':'event_timestamp'})
-    print(f'count_before: {len(interaction_df)}')
+    
     interaction_df = pd.concat([interaction_df, stream_positive_inter_df], axis=0)
     neg_interaction_df = pd.concat([neg_interaction_df, stream_negetive_inter_df], axis=0)
-    print(f'count_after: {len(interaction_df)}')
+
     
     # Pass artifacts
     item_df.to_parquet(item_df_output.path)
