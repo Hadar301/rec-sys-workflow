@@ -4,7 +4,7 @@ import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model
 
-IMAGE_TAG = '0.0.13'
+IMAGE_TAG = '0.0.15'
 # IMAGE_TAG = 'latest'
 
 @dsl.component(
@@ -104,6 +104,8 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     import os
     import psycopg2
     from sqlalchemy import create_engine
+    print(f'MyTest: {os.listdir('.')}')
+    print(f'MyTest2: {os.listdir('feature_repo/')}')
     store = FeatureStore(repo_path="feature_repo/")
     # load feature services
     item_service = store.get_feature_service("item_service")
@@ -156,7 +158,6 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     
     interaction_df = pd.concat([interaction_df, stream_positive_inter_df], axis=0)
     neg_interaction_df = pd.concat([neg_interaction_df, stream_negetive_inter_df], axis=0)
-
     
     # Pass artifacts
     item_df.to_parquet(item_df_output.path)
@@ -169,16 +170,57 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     interaction_df_output.metadata['format'] = 'parquet'
     neg_interaction_df_output.metadata['format'] = 'parquet'
 
+# def mount_secret_feast_repository(task):
+#     # Mount feast regesty crt
+#     task.add_volume(
+#         dsl.PipelineVolume(
+#             name="feast-registry-volume",
+#             secret=dsl.SecretVolume(
+#                 secret_name="feast-feast-edb-rec-sys-registry-tls",
+#                 items=[{"key": "tls.crt", "path": "service-ca.crt"}],
+#             ),
+#         )
+#     )
+#     task.add_volume_mount(
+#         dsl.VolumeMount(
+#             name="feast-registry-volume",
+#             mount_path="/app/feature_repo",
+#         )
+#     )
+#     # Mount password from postgres
+#     task.add_volume(
+#         dsl.PipelineVolume(
+#             name="postgres-volume",
+#             secret=dsl.SecretVolume(
+#                 secret_name="cluster-sample-app",
+#                 items=[{"key": "password", "path": "password.crt"}],
+#             ),
+#         )
+#     )
+#     task.add_volume_mount(
+#         dsl.VolumeMount(
+#             name="postgres-volume",
+#             mount_path="/app/feature_repo",
+#         )
+#     )
+    
+def mount_secret_feast_repository(task):
+    kubernetes.use_secret_as_env(
+        task=task,
+        secret_name='cluster-sample-app',
+        secret_key_to_env={'uri': 'uri', 'password': 'DB_PASSWORD'},
+    )
+    kubernetes.use_secret_as_volume(
+        task=task,
+        secret_name='feast-feast-edb-rec-sys-registry-tls',
+        mount_path='/app/feature_repo',
+    )
     
 @dsl.pipeline(name=os.path.basename(__file__).replace(".py", ""))
 def batch_recommendation():
     
     load_data_task = load_data_from_feast()
-    kubernetes.use_secret_as_env(
-        task=load_data_task,
-        secret_name='cluster-sample-app',
-        secret_key_to_env={'uri': 'uri'},
-    )
+    mount_secret_feast_repository(load_data_task)
     # Component configurations
     load_data_task.set_caching_options(False)
     
@@ -196,6 +238,7 @@ def batch_recommendation():
         item_df_input=load_data_task.outputs['item_df_output'],
         user_df_input=load_data_task.outputs['user_df_output'],
     ).after(train_model_task)
+    mount_secret_feast_repository(generate_candidates_task)
     generate_candidates_task.set_caching_options(False)
 
 

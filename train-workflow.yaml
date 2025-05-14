@@ -134,7 +134,7 @@ deploymentSpec:
           \ = datetime.now()\n    user_items_df['top_k_item_ids'] = item_recommendation\n\
           \n    store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE)\n\
           \n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.13
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.15
     exec-load-data-from-feast:
       container:
         args:
@@ -189,27 +189,22 @@ deploymentSpec:
           \ features=user_service).to_df()\n    interaction_df = store.get_historical_features(entity_df=item_user_interactions_df,\
           \ features=interaction_service).to_df()\n    neg_interaction_df = store.get_historical_features(entity_df=item_user_neg_interactions_df,\
           \ features=neg_interactions_service).to_df()\n\n    uri = os.getenv('uri',\
-          \ None)\n    # postgres_password = os.getenv('POSTGRES_PASSWORD', 'GwAh33gW9mWiBsfywo42pTtTPkg0TUODFerhdvP3endXPX8Fda0FlhKCy2xPMkPY')\n\
-          \    # Database connection parameters\n    # db_params = {\n    #     'host':\
-          \ fqdn,\n    #     'port': 5432,\n    #     'database': dbname,\n    # \
-          \    'user': user,\n    #     'password': postgres_password\n    # }\n\n\
-          \    # Create SQLAlchemy engine\n    engine = create_engine(uri)\n\n   \
-          \ # Query the table into a pandas DataFrame\n    query_negative = 'SELECT\
-          \ * FROM stream_interaction_negetive'\n    query_positive = 'SELECT * FROM\
-          \ stream_interaction_positive'\n    # query_negative = 'SELECT * FROM stream_negative_interaction'\n\
-          \    # query_positive = 'SELECT * FROM stream_positive_interaction'\n  \
-          \  stream_positive_inter_df = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})\n\
+          \ None)\n    engine = create_engine(uri)\n\n    # Query the table into a\
+          \ pandas DataFrame\n    query_negative = 'SELECT * FROM stream_interaction_negetive'\n\
+          \    query_positive = 'SELECT * FROM stream_interaction_positive'\n    #\
+          \ query_negative = 'SELECT * FROM stream_negative_interaction'\n    # query_positive\
+          \ = 'SELECT * FROM stream_positive_interaction'\n    stream_positive_inter_df\
+          \ = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})\n\
           \    stream_negetive_inter_df = pd.read_sql(query_negative, engine).rename(columns={'timestamp':'event_timestamp'})\n\
-          \    print(f'count_before: {len(interaction_df)}')\n    interaction_df =\
-          \ pd.concat([interaction_df, stream_positive_inter_df], axis=0)\n    neg_interaction_df\
-          \ = pd.concat([neg_interaction_df, stream_negetive_inter_df], axis=0)\n\
-          \    print(f'count_after: {len(interaction_df)}')\n\n    # Pass artifacts\n\
-          \    item_df.to_parquet(item_df_output.path)\n    user_df.to_parquet(user_df_output.path)\n\
-          \    interaction_df.to_parquet(interaction_df_output.path)\n    neg_interaction_df.to_parquet(neg_interaction_df_output.path)\n\
-          \n    item_df_output.metadata['format'] = 'parquet'\n    user_df_output.metadata['format']\
+          \n    interaction_df = pd.concat([interaction_df, stream_positive_inter_df],\
+          \ axis=0)\n    neg_interaction_df = pd.concat([neg_interaction_df, stream_negetive_inter_df],\
+          \ axis=0)\n\n    # Pass artifacts\n    item_df.to_parquet(item_df_output.path)\n\
+          \    user_df.to_parquet(user_df_output.path)\n    interaction_df.to_parquet(interaction_df_output.path)\n\
+          \    neg_interaction_df.to_parquet(neg_interaction_df_output.path)\n\n \
+          \   item_df_output.metadata['format'] = 'parquet'\n    user_df_output.metadata['format']\
           \ = 'parquet'\n    interaction_df_output.metadata['format'] = 'parquet'\n\
           \    neg_interaction_df_output.metadata['format'] = 'parquet'\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.13
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.15
     exec-train-model:
       container:
         args:
@@ -251,7 +246,7 @@ deploymentSpec:
           \ torch.save(user_encoder.state_dict(), user_output_model.path)\n    item_output_model.metadata['framework']\
           \ = 'pytorch'\n    user_output_model.metadata['framework'] = 'pytorch'\n\
           \n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.13
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.15
 pipelineInfo:
   name: train-workflow
 root:
@@ -323,9 +318,27 @@ platforms:
   kubernetes:
     deploymentSpec:
       executors:
+        exec-generate-candidates:
+          secretAsEnv:
+          - keyToEnv:
+            - envVar: uri
+              secretKey: uri
+            - envVar: DB_PASSWORD
+              secretKey: password
+            secretName: cluster-sample-app
+          secretAsVolume:
+          - mountPath: /app/feature_repo
+            optional: false
+            secretName: feast-feast-edb-rec-sys-registry-tls
         exec-load-data-from-feast:
           secretAsEnv:
           - keyToEnv:
             - envVar: uri
               secretKey: uri
+            - envVar: DB_PASSWORD
+              secretKey: password
             secretName: cluster-sample-app
+          secretAsVolume:
+          - mountPath: /app/feature_repo
+            optional: false
+            secretName: feast-feast-edb-rec-sys-registry-tls
