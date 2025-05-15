@@ -4,11 +4,11 @@ import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model
 
-IMAGE_TAG = '0.0.15'
+IMAGE_TAG = '0.0.18'
 # IMAGE_TAG = 'latest'
 
 @dsl.component(
-    base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}", packages_to_install=['grpcio'])
+    base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}")
 def generate_candidates(item_input_model: Input[Model], user_input_model: Input[Model], item_df_input: Input[Dataset], user_df_input: Input[Dataset]):
     from feast import FeatureStore
     from feast.data_source import PushMode
@@ -96,16 +96,17 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
     user_output_model.metadata['framework'] = 'pytorch'
     
 @dsl.component(
-    base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}", packages_to_install=['grpcio', 'psycopg2'])
+    base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}", packages_to_install=['psycopg2'])
 def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output[Dataset], interaction_df_output: Output[Dataset], neg_interaction_df_output: Output[Dataset]):
     from feast import FeatureStore
     from datetime import datetime
     import pandas as pd
     import os
     import psycopg2
-    from sqlalchemy import create_engine
-    print(f'MyTest: {os.listdir('.')}')
-    print(f'MyTest2: {os.listdir('feature_repo/')}')
+    from sqlalchemy import create_engine, text
+    print(f'MyTest: {os.listdir(".")}')
+    print(f'MyTest2: {os.listdir("feature_repo/")}')
+    print(f'MyTest3: {os.listdir("feature_repo/secrets")}')
     store = FeatureStore(repo_path="feature_repo/")
     # load feature services
     item_service = store.get_feature_service("item_service")
@@ -148,16 +149,23 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     uri = os.getenv('uri', None)
     engine = create_engine(uri)
 
-    # Query the table into a pandas DataFrame
-    query_negative = 'SELECT * FROM stream_interaction_negetive'
-    query_positive = 'SELECT * FROM stream_interaction_positive'
-    # query_negative = 'SELECT * FROM stream_negative_interaction'
-    # query_positive = 'SELECT * FROM stream_positive_interaction'
-    stream_positive_inter_df = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})
-    stream_negetive_inter_df = pd.read_sql(query_negative, engine).rename(columns={'timestamp':'event_timestamp'})
+    def table_exists(engine, table_name):
+        query = text("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = :table_name")
+        with engine.connect() as connection:
+            result = connection.execute(query, {"table_name": table_name}).scalar()
+            return result > 0
     
-    interaction_df = pd.concat([interaction_df, stream_positive_inter_df], axis=0)
-    neg_interaction_df = pd.concat([neg_interaction_df, stream_negetive_inter_df], axis=0)
+    if table_exists(engine, 'stream_interaction_negetive'):
+        query_negative = 'SELECT * FROM stream_interaction_negetive'
+        stream_negetive_inter_df = pd.read_sql(query_negative, engine).rename(columns={'timestamp':'event_timestamp'})
+        
+        neg_interaction_df = pd.concat([neg_interaction_df, stream_negetive_inter_df], axis=0)
+    
+    if table_exists(engine, 'stream_interaction_positive'):
+        query_positive = 'SELECT * FROM stream_interaction_positive'
+        stream_positive_inter_df = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})
+        
+        interaction_df = pd.concat([interaction_df, stream_positive_inter_df], axis=0)
     
     # Pass artifacts
     item_df.to_parquet(item_df_output.path)
@@ -170,40 +178,7 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     interaction_df_output.metadata['format'] = 'parquet'
     neg_interaction_df_output.metadata['format'] = 'parquet'
 
-# def mount_secret_feast_repository(task):
-#     # Mount feast regesty crt
-#     task.add_volume(
-#         dsl.PipelineVolume(
-#             name="feast-registry-volume",
-#             secret=dsl.SecretVolume(
-#                 secret_name="feast-feast-edb-rec-sys-registry-tls",
-#                 items=[{"key": "tls.crt", "path": "service-ca.crt"}],
-#             ),
-#         )
-#     )
-#     task.add_volume_mount(
-#         dsl.VolumeMount(
-#             name="feast-registry-volume",
-#             mount_path="/app/feature_repo",
-#         )
-#     )
-#     # Mount password from postgres
-#     task.add_volume(
-#         dsl.PipelineVolume(
-#             name="postgres-volume",
-#             secret=dsl.SecretVolume(
-#                 secret_name="cluster-sample-app",
-#                 items=[{"key": "password", "path": "password.crt"}],
-#             ),
-#         )
-#     )
-#     task.add_volume_mount(
-#         dsl.VolumeMount(
-#             name="postgres-volume",
-#             mount_path="/app/feature_repo",
-#         )
-#     )
-    
+
 def mount_secret_feast_repository(task):
     kubernetes.use_secret_as_env(
         task=task,
@@ -213,7 +188,7 @@ def mount_secret_feast_repository(task):
     kubernetes.use_secret_as_volume(
         task=task,
         secret_name='feast-feast-edb-rec-sys-registry-tls',
-        mount_path='/app/feature_repo',
+        mount_path='/app/feature_repo/secrets',
     )
     
 @dsl.pipeline(name=os.path.basename(__file__).replace(".py", ""))

@@ -86,9 +86,8 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'grpcio' &&\
-          \ \"$0\" \"$@\"\n"
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -134,7 +133,7 @@ deploymentSpec:
           \ = datetime.now()\n    user_items_df['top_k_item_ids'] = item_recommendation\n\
           \n    store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE)\n\
           \n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.15
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.18
     exec-load-data-from-feast:
       container:
         args:
@@ -149,8 +148,8 @@ deploymentSpec:
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'grpcio' 'psycopg2'\
-          \ && \"$0\" \"$@\"\n"
+          \  python3 -m pip install --quiet --no-warn-script-location 'psycopg2' &&\
+          \ \"$0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -166,7 +165,9 @@ deploymentSpec:
           \ Output[Dataset], interaction_df_output: Output[Dataset], neg_interaction_df_output:\
           \ Output[Dataset]):\n    from feast import FeatureStore\n    from datetime\
           \ import datetime\n    import pandas as pd\n    import os\n    import psycopg2\n\
-          \    from sqlalchemy import create_engine\n    store = FeatureStore(repo_path=\"\
+          \    from sqlalchemy import create_engine, text\n    print(f'MyTest: {os.listdir(\"\
+          .\")}')\n    print(f'MyTest2: {os.listdir(\"feature_repo/\")}')\n    print(f'MyTest3:\
+          \ {os.listdir(\"feature_repo/secrets\")}')\n    store = FeatureStore(repo_path=\"\
           feature_repo/\")\n    # load feature services\n    item_service = store.get_feature_service(\"\
           item_service\")\n    user_service = store.get_feature_service(\"user_service\"\
           )\n    interaction_service = store.get_feature_service(\"interaction_service\"\
@@ -189,22 +190,25 @@ deploymentSpec:
           \ features=user_service).to_df()\n    interaction_df = store.get_historical_features(entity_df=item_user_interactions_df,\
           \ features=interaction_service).to_df()\n    neg_interaction_df = store.get_historical_features(entity_df=item_user_neg_interactions_df,\
           \ features=neg_interactions_service).to_df()\n\n    uri = os.getenv('uri',\
-          \ None)\n    engine = create_engine(uri)\n\n    # Query the table into a\
-          \ pandas DataFrame\n    query_negative = 'SELECT * FROM stream_interaction_negetive'\n\
-          \    query_positive = 'SELECT * FROM stream_interaction_positive'\n    #\
-          \ query_negative = 'SELECT * FROM stream_negative_interaction'\n    # query_positive\
-          \ = 'SELECT * FROM stream_positive_interaction'\n    stream_positive_inter_df\
-          \ = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})\n\
-          \    stream_negetive_inter_df = pd.read_sql(query_negative, engine).rename(columns={'timestamp':'event_timestamp'})\n\
-          \n    interaction_df = pd.concat([interaction_df, stream_positive_inter_df],\
-          \ axis=0)\n    neg_interaction_df = pd.concat([neg_interaction_df, stream_negetive_inter_df],\
-          \ axis=0)\n\n    # Pass artifacts\n    item_df.to_parquet(item_df_output.path)\n\
+          \ None)\n    engine = create_engine(uri)\n\n    def table_exists(engine,\
+          \ table_name):\n        query = text(\"SELECT COUNT(*) FROM information_schema.tables\
+          \ WHERE table_name = :table_name\")\n        with engine.connect() as connection:\n\
+          \            result = connection.execute(query, {\"table_name\": table_name}).scalar()\n\
+          \            return result > 0\n\n    if table_exists(engine, 'stream_interaction_negetive'):\n\
+          \        query_negative = 'SELECT * FROM stream_interaction_negetive'\n\
+          \        stream_negetive_inter_df = pd.read_sql(query_negative, engine).rename(columns={'timestamp':'event_timestamp'})\n\
+          \n        neg_interaction_df = pd.concat([neg_interaction_df, stream_negetive_inter_df],\
+          \ axis=0)\n\n    if table_exists(engine, 'stream_interaction_positive'):\n\
+          \        query_positive = 'SELECT * FROM stream_interaction_positive'\n\
+          \        stream_positive_inter_df = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})\n\
+          \n        interaction_df = pd.concat([interaction_df, stream_positive_inter_df],\
+          \ axis=0)\n    # Pass artifacts\n    item_df.to_parquet(item_df_output.path)\n\
           \    user_df.to_parquet(user_df_output.path)\n    interaction_df.to_parquet(interaction_df_output.path)\n\
           \    neg_interaction_df.to_parquet(neg_interaction_df_output.path)\n\n \
           \   item_df_output.metadata['format'] = 'parquet'\n    user_df_output.metadata['format']\
           \ = 'parquet'\n    interaction_df_output.metadata['format'] = 'parquet'\n\
           \    neg_interaction_df_output.metadata['format'] = 'parquet'\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.15
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.18
     exec-train-model:
       container:
         args:
@@ -246,7 +250,7 @@ deploymentSpec:
           \ torch.save(user_encoder.state_dict(), user_output_model.path)\n    item_output_model.metadata['framework']\
           \ = 'pytorch'\n    user_output_model.metadata['framework'] = 'pytorch'\n\
           \n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.15
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.18
 pipelineInfo:
   name: train-workflow
 root:
@@ -327,7 +331,7 @@ platforms:
               secretKey: password
             secretName: cluster-sample-app
           secretAsVolume:
-          - mountPath: /app/feature_repo
+          - mountPath: /app/feature_repo/secrets
             optional: false
             secretName: feast-feast-edb-rec-sys-registry-tls
         exec-load-data-from-feast:
@@ -339,6 +343,6 @@ platforms:
               secretKey: password
             secretName: cluster-sample-app
           secretAsVolume:
-          - mountPath: /app/feature_repo
+          - mountPath: /app/feature_repo/secrets
             optional: false
             secretName: feast-feast-edb-rec-sys-registry-tls
