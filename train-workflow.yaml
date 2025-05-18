@@ -105,15 +105,17 @@ deploymentSpec:
           \    from models.data_util import data_preproccess\n    from models.user_tower\
           \ import UserTower\n    from models.item_tower import ItemTower\n    import\
           \ pandas as pd\n    import numpy as np\n    from datetime import datetime\n\
-          \    import torch\n    store = FeatureStore(repo_path=\"feature_repo/\"\
-          )\n\n    item_encoder = ItemTower()\n    user_encoder = UserTower()\n  \
-          \  item_encoder.load_state_dict(torch.load(item_input_model.path))\n   \
-          \ user_encoder.load_state_dict(torch.load(user_input_model.path))\n    item_encoder.eval()\n\
-          \    user_encoder.eval()\n    # load item and user dataframes\n    item_df\
-          \ = pd.read_parquet(item_df_input.path)\n    user_df = pd.read_parquet(user_df_input.path)\n\
-          \n    # Create a new table to be push to the online store\n    item_embed_df\
-          \ = item_df[['item_id']].copy()\n    user_embed_df = user_df[['user_id']].copy()\n\
-          \n    # Encode the items and users\n    item_embed_df['embedding'] = item_encoder(**data_preproccess(item_df)).detach().numpy().tolist()\n\
+          \    import torch\n    with open('feature_repo/feature_store.yaml', 'r')\
+          \ as file:\n        print(file.read())\n\n    store = FeatureStore(repo_path=\"\
+          feature_repo/\")\n\n    item_encoder = ItemTower()\n    user_encoder = UserTower()\n\
+          \    item_encoder.load_state_dict(torch.load(item_input_model.path))\n \
+          \   user_encoder.load_state_dict(torch.load(user_input_model.path))\n  \
+          \  item_encoder.eval()\n    user_encoder.eval()\n    # load item and user\
+          \ dataframes\n    item_df = pd.read_parquet(item_df_input.path)\n    user_df\
+          \ = pd.read_parquet(user_df_input.path)\n\n    # Create a new table to be\
+          \ push to the online store\n    item_embed_df = item_df[['item_id']].copy()\n\
+          \    user_embed_df = user_df[['user_id']].copy()\n\n    # Encode the items\
+          \ and users\n    item_embed_df['embedding'] = item_encoder(**data_preproccess(item_df)).detach().numpy().tolist()\n\
           \    user_embed_df['embedding'] = user_encoder(**data_preproccess(user_df)).detach().numpy().tolist()\n\
           \n    # Add the currnet timestamp\n    item_embed_df['event_timestamp']\
           \ = datetime.now()\n    user_embed_df['event_timestamp'] = datetime.now()\n\
@@ -133,7 +135,7 @@ deploymentSpec:
           \ = datetime.now()\n    user_items_df['top_k_item_ids'] = item_recommendation\n\
           \n    store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE)\n\
           \n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.18
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.19
     exec-load-data-from-feast:
       container:
         args:
@@ -165,7 +167,8 @@ deploymentSpec:
           \ Output[Dataset], interaction_df_output: Output[Dataset], neg_interaction_df_output:\
           \ Output[Dataset]):\n    from feast import FeatureStore\n    from datetime\
           \ import datetime\n    import pandas as pd\n    import os\n    import psycopg2\n\
-          \    from sqlalchemy import create_engine, text\n    print(f'MyTest: {os.listdir(\"\
+          \    from sqlalchemy import create_engine, text\n    with open('feature_repo/feature_store.yaml',\
+          \ 'r') as file:\n        print(file.read())\n    print(f'MyTest: {os.listdir(\"\
           .\")}')\n    print(f'MyTest2: {os.listdir(\"feature_repo/\")}')\n    print(f'MyTest3:\
           \ {os.listdir(\"feature_repo/secrets\")}')\n    store = FeatureStore(repo_path=\"\
           feature_repo/\")\n    # load feature services\n    item_service = store.get_feature_service(\"\
@@ -202,13 +205,13 @@ deploymentSpec:
           \        query_positive = 'SELECT * FROM stream_interaction_positive'\n\
           \        stream_positive_inter_df = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})\n\
           \n        interaction_df = pd.concat([interaction_df, stream_positive_inter_df],\
-          \ axis=0)\n    # Pass artifacts\n    item_df.to_parquet(item_df_output.path)\n\
+          \ axis=0)\n\n    # Pass artifacts\n    item_df.to_parquet(item_df_output.path)\n\
           \    user_df.to_parquet(user_df_output.path)\n    interaction_df.to_parquet(interaction_df_output.path)\n\
           \    neg_interaction_df.to_parquet(neg_interaction_df_output.path)\n\n \
           \   item_df_output.metadata['format'] = 'parquet'\n    user_df_output.metadata['format']\
           \ = 'parquet'\n    interaction_df_output.metadata['format'] = 'parquet'\n\
           \    neg_interaction_df_output.metadata['format'] = 'parquet'\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.18
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.19
     exec-train-model:
       container:
         args:
@@ -250,7 +253,7 @@ deploymentSpec:
           \ torch.save(user_encoder.state_dict(), user_output_model.path)\n    item_output_model.metadata['framework']\
           \ = 'pytorch'\n    user_output_model.metadata['framework'] = 'pytorch'\n\
           \n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.18
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.19
 pipelineInfo:
   name: train-workflow
 root:

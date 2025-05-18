@@ -4,7 +4,7 @@ import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model
 
-IMAGE_TAG = '0.0.18'
+IMAGE_TAG = '0.0.19'
 # IMAGE_TAG = 'latest'
 
 @dsl.component(
@@ -19,6 +19,9 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     import numpy as np
     from datetime import datetime
     import torch
+    with open('feature_repo/feature_store.yaml', 'r') as file:
+        print(file.read())
+
     store = FeatureStore(repo_path="feature_repo/")
     
     item_encoder = ItemTower()
@@ -72,7 +75,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE)
 
 
-@dsl.component(base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}",)
+@dsl.component(base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}")
 def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], interaction_df_input: Input[Dataset], neg_interaction_df_input:Input[Dataset], item_output_model: Output[Model], user_output_model: Output[Model]):
     from models.user_tower import UserTower
     from models.item_tower import ItemTower
@@ -104,6 +107,8 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     import os
     import psycopg2
     from sqlalchemy import create_engine, text
+    with open('feature_repo/feature_store.yaml', 'r') as file:
+        print(file.read())
     print(f'MyTest: {os.listdir(".")}')
     print(f'MyTest2: {os.listdir("feature_repo/")}')
     print(f'MyTest3: {os.listdir("feature_repo/secrets")}')
@@ -213,7 +218,16 @@ def batch_recommendation():
         item_df_input=load_data_task.outputs['item_df_output'],
         user_df_input=load_data_task.outputs['user_df_output'],
     ).after(train_model_task)
-    mount_secret_feast_repository(generate_candidates_task)
+    kubernetes.use_secret_as_env(
+        task=generate_candidates_task,
+        secret_name='cluster-sample-app',
+        secret_key_to_env={'uri': 'uri', 'password': 'DB_PASSWORD'},
+    )
+    kubernetes.use_secret_as_volume(
+        task=generate_candidates_task,
+        secret_name='feast-feast-edb-rec-sys-registry-tls',
+        mount_path='/app/feature_repo/secrets',
+    )
     generate_candidates_task.set_caching_options(False)
 
 
