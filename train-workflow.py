@@ -26,7 +26,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
         print(file.read())
 
     store = FeatureStore(repo_path="feature_repo/")
-    
+
     item_encoder = ItemTower()
     user_encoder = UserTower()
     item_encoder.load_state_dict(torch.load(item_input_model.path))
@@ -36,7 +36,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     # load item and user dataframes
     item_df = pd.read_parquet(item_df_input.path)
     user_df = pd.read_parquet(user_df_input.path)
-    
+
     # Create a new table to be push to the online store
     item_embed_df = item_df[['item_id']].copy()
     user_embed_df = user_df[['user_id']].copy()
@@ -52,7 +52,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     # Push the new embedding to the offline and online store
     store.push('item_embed_push_source', item_embed_df, to=PushMode.ONLINE)
     store.push('user_embed_push_source', user_embed_df, to=PushMode.ONLINE)
-    
+
     # Materilize the online store
     store.materialize_incremental(datetime.now(), feature_views=['item_embedding', 'user_items', 'item_features'])
 
@@ -95,12 +95,12 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
     item_encoder = ItemTower(dim)
     user_encoder = UserTower(dim)
     train_two_tower(item_encoder, user_encoder, item_df, user_df, interaction_df, neg_interaction_df)
-    
+
     torch.save(item_encoder.state_dict(), item_output_model.path)
     torch.save(user_encoder.state_dict(), user_output_model.path)
     item_output_model.metadata['framework'] = 'pytorch'
     user_output_model.metadata['framework'] = 'pytorch'
-    
+
 @dsl.component(
     base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}", packages_to_install=['psycopg2'])
 def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output[Dataset], interaction_df_output: Output[Dataset], neg_interaction_df_output: Output[Dataset]):
@@ -135,14 +135,14 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     item_entity_df = pd.DataFrame.from_dict(
         {
             'item_id': item_ids,
-            'event_timestamp': [datetime(2025, 1, 1)] * len(item_ids) 
+            'event_timestamp': [datetime(2025, 1, 1)] * len(item_ids)
         }
     )
     # select which users to use for the training
     user_entity_df = pd.DataFrame.from_dict(
         {
             'user_id': user_ids,
-            'event_timestamp': [datetime(2025, 1, 1)] * len(user_ids) 
+            'event_timestamp': [datetime(2025, 1, 1)] * len(user_ids)
         }
     )
     # Select which item-user interactions to use for the training
@@ -156,7 +156,7 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     user_df = store.get_historical_features(entity_df=user_entity_df, features=user_service).to_df()
     interaction_df = store.get_historical_features(entity_df=item_user_interactions_df, features=interaction_service).to_df()
     neg_interaction_df = store.get_historical_features(entity_df=item_user_neg_interactions_df, features=neg_interactions_service).to_df()
-    
+
     uri = os.getenv('uri', None)
     engine = create_engine(uri)
 
@@ -165,25 +165,25 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
         with engine.connect() as connection:
             result = connection.execute(query, {"table_name": table_name}).scalar()
             return result > 0
-    
+
     if table_exists(engine, 'stream_interaction_negetive'):
         query_negative = 'SELECT * FROM stream_interaction_negetive'
         stream_negetive_inter_df = pd.read_sql(query_negative, engine).rename(columns={'timestamp':'event_timestamp'})
-        
+
         neg_interaction_df = pd.concat([neg_interaction_df, stream_negetive_inter_df], axis=0)
-    
+
     if table_exists(engine, 'stream_interaction_positive'):
         query_positive = 'SELECT * FROM stream_interaction_positive'
         stream_positive_inter_df = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})
-        
+
         interaction_df = pd.concat([interaction_df, stream_positive_inter_df], axis=0)
-    
+
     # Pass artifacts
     item_df.to_parquet(item_df_output.path)
     user_df.to_parquet(user_df_output.path)
     interaction_df.to_parquet(interaction_df_output.path)
     neg_interaction_df.to_parquet(neg_interaction_df_output.path)
-    
+
     item_df_output.metadata['format'] = 'parquet'
     user_df_output.metadata['format'] = 'parquet'
     interaction_df_output.metadata['format'] = 'parquet'
@@ -193,7 +193,7 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
 def mount_secret_feast_repository(task):
     kubernetes.use_secret_as_env(
         task=task,
-        secret_name='cluster-sample-app',
+        secret_name=os.getenv('DB_SECRET_NAME', 'cluster-sample-app'),
         secret_key_to_env={'uri': 'uri', 'password': 'DB_PASSWORD'},
     )
     kubernetes.use_secret_as_volume(
@@ -201,15 +201,15 @@ def mount_secret_feast_repository(task):
         secret_name='feast-feast-edb-rec-sys-registry-tls',
         mount_path='/app/feature_repo/secrets',
     )
-    
+
 @dsl.pipeline(name=os.path.basename(__file__).replace(".py", ""))
 def batch_recommendation():
-    
+
     load_data_task = load_data_from_feast()
     mount_secret_feast_repository(load_data_task)
     # Component configurations
     load_data_task.set_caching_options(False)
-    
+
     train_model_task = train_model(
         item_df_input=load_data_task.outputs['item_df_output'],
         user_df_input=load_data_task.outputs['user_df_output'],
@@ -217,7 +217,7 @@ def batch_recommendation():
         neg_interaction_df_input=load_data_task.outputs['neg_interaction_df_output'],
     ).after(load_data_task)
     train_model_task.set_caching_options(False)
-    
+
     generate_candidates_task = generate_candidates(
         item_input_model=train_model_task.outputs['item_output_model'],
         user_input_model=train_model_task.outputs['user_output_model'],
@@ -226,7 +226,7 @@ def batch_recommendation():
     ).after(train_model_task)
     kubernetes.use_secret_as_env(
         task=generate_candidates_task,
-        secret_name='cluster-sample-app',
+        secret_name=os.getenv('DB_SECRET_NAME', 'cluster-sample-app'),
         secret_key_to_env={'uri': 'uri', 'password': 'DB_PASSWORD'},
     )
     kubernetes.use_secret_as_volume(
