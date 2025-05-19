@@ -4,7 +4,7 @@ import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model
 
-IMAGE_TAG = '0.0.19'
+IMAGE_TAG = '0.0.23'
 # IMAGE_TAG = 'latest'
 
 @dsl.component(
@@ -19,6 +19,9 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     import numpy as np
     from datetime import datetime
     import torch
+    import subprocess
+
+    subprocess.run(["/bin/bash", "-c", "ls", "&&","./entrypoint.sh"], check=True)
     with open('feature_repo/feature_store.yaml', 'r') as file:
         print(file.read())
 
@@ -107,6 +110,9 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     import os
     import psycopg2
     from sqlalchemy import create_engine, text
+    import subprocess
+
+    subprocess.run(["/bin/bash", "-c", "ls", "&&","./entrypoint.sh"], check=True)
     with open('feature_repo/feature_store.yaml', 'r') as file:
         print(file.read())
     print(f'MyTest: {os.listdir(".")}')

@@ -105,8 +105,9 @@ deploymentSpec:
           \    from models.data_util import data_preproccess\n    from models.user_tower\
           \ import UserTower\n    from models.item_tower import ItemTower\n    import\
           \ pandas as pd\n    import numpy as np\n    from datetime import datetime\n\
-          \    import torch\n    with open('feature_repo/feature_store.yaml', 'r')\
-          \ as file:\n        print(file.read())\n\n    store = FeatureStore(repo_path=\"\
+          \    import torch\n    import subprocess\n\n    subprocess.run([\"/bin/bash\"\
+          , \"-c\", \"ls\", \"&&\",\"./entrypoint.sh\"], check=True)\n    with open('feature_repo/feature_store.yaml',\
+          \ 'r') as file:\n        print(file.read())\n\n    store = FeatureStore(repo_path=\"\
           feature_repo/\")\n\n    item_encoder = ItemTower()\n    user_encoder = UserTower()\n\
           \    item_encoder.load_state_dict(torch.load(item_input_model.path))\n \
           \   user_encoder.load_state_dict(torch.load(user_input_model.path))\n  \
@@ -135,7 +136,7 @@ deploymentSpec:
           \ = datetime.now()\n    user_items_df['top_k_item_ids'] = item_recommendation\n\
           \n    store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE)\n\
           \n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.19
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.23
     exec-load-data-from-feast:
       container:
         args:
@@ -167,8 +168,10 @@ deploymentSpec:
           \ Output[Dataset], interaction_df_output: Output[Dataset], neg_interaction_df_output:\
           \ Output[Dataset]):\n    from feast import FeatureStore\n    from datetime\
           \ import datetime\n    import pandas as pd\n    import os\n    import psycopg2\n\
-          \    from sqlalchemy import create_engine, text\n    with open('feature_repo/feature_store.yaml',\
-          \ 'r') as file:\n        print(file.read())\n    print(f'MyTest: {os.listdir(\"\
+          \    from sqlalchemy import create_engine, text\n    import subprocess\n\
+          \n    subprocess.run([\"/bin/bash\", \"-c\", \"ls\", \"&&\",\"./entrypoint.sh\"\
+          ], check=True)\n    with open('feature_repo/feature_store.yaml', 'r') as\
+          \ file:\n        print(file.read())\n    print(f'MyTest: {os.listdir(\"\
           .\")}')\n    print(f'MyTest2: {os.listdir(\"feature_repo/\")}')\n    print(f'MyTest3:\
           \ {os.listdir(\"feature_repo/secrets\")}')\n    store = FeatureStore(repo_path=\"\
           feature_repo/\")\n    # load feature services\n    item_service = store.get_feature_service(\"\
@@ -211,7 +214,7 @@ deploymentSpec:
           \   item_df_output.metadata['format'] = 'parquet'\n    user_df_output.metadata['format']\
           \ = 'parquet'\n    interaction_df_output.metadata['format'] = 'parquet'\n\
           \    neg_interaction_df_output.metadata['format'] = 'parquet'\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.19
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.23
     exec-train-model:
       container:
         args:
@@ -253,7 +256,7 @@ deploymentSpec:
           \ torch.save(user_encoder.state_dict(), user_output_model.path)\n    item_output_model.metadata['framework']\
           \ = 'pytorch'\n    user_output_model.metadata['framework'] = 'pytorch'\n\
           \n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.19
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.23
 pipelineInfo:
   name: train-workflow
 root:
