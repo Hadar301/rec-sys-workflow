@@ -121,21 +121,20 @@ deploymentSpec:
           \n    # Add the currnet timestamp\n    item_embed_df['event_timestamp']\
           \ = datetime.now()\n    user_embed_df['event_timestamp'] = datetime.now()\n\
           \n    # Push the new embedding to the offline and online store\n    store.push('item_embed_push_source',\
-          \ item_embed_df, to=PushMode.ONLINE)\n    store.push('user_embed_push_source',\
-          \ user_embed_df, to=PushMode.ONLINE)\n\n    # Materilize the online store\n\
-          \    store.materialize_incremental(datetime.now(), feature_views=['item_embedding',\
-          \ 'user_items', 'item_features'])\n\n    # Calculate user recommendations\
-          \ for each user\n    item_embedding_view = 'item_embedding'\n    k = 64\n\
-          \    item_recommendation = []\n    for user_embed in user_embed_df['embedding']:\n\
-          \        item_recommendation.append(\n            store.retrieve_online_documents(\n\
-          \                query=user_embed,\n                top_k=k,\n         \
-          \       features=[f'{item_embedding_view}:item_id']\n                # features=[f'{item_embedding_view}:item_id',\
-          \ f'{item_embedding_view}:embeddings']\n            ).to_df()['item_id'].to_list()\n\
-          \        )\n\n    # Pushing the calculated items to the online store\n \
-          \   user_items_df = user_embed_df[['user_id']].copy()\n    user_items_df['event_timestamp']\
-          \ = datetime.now()\n    user_items_df['top_k_item_ids'] = item_recommendation\n\
-          \n    store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE)\n\
-          \n"
+          \ item_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)\n    store.push('user_embed_push_source',\
+          \ user_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)\n\n   \
+          \ # Materilize the online store\n    store.materialize_incremental(datetime.now(),\
+          \ feature_views=['item_embedding', 'user_items', 'item_features'])\n\n \
+          \   # Calculate user recommendations for each user\n    item_embedding_view\
+          \ = 'item_embedding'\n    k = 64\n    item_recommendation = []\n    for\
+          \ user_embed in user_embed_df['embedding']:\n        item_recommendation.append(\n\
+          \            store.retrieve_online_documents(\n                query=user_embed,\n\
+          \                top_k=k,\n                features=[f'{item_embedding_view}:item_id']\n\
+          \            ).to_df()['item_id'].to_list()\n        )\n\n    # Pushing\
+          \ the calculated items to the online store\n    user_items_df = user_embed_df[['user_id']].copy()\n\
+          \    user_items_df['event_timestamp'] = datetime.now()\n    user_items_df['top_k_item_ids']\
+          \ = item_recommendation\n\n    store.push('user_items_push_source', user_items_df,\
+          \ to=PushMode.ONLINE, allow_registry_cache=False)\n\n"
         image: quay.io/ecosystem-appeng/rec-sys-app:0.0.23
     exec-load-data-from-feast:
       container:
@@ -182,10 +181,10 @@ deploymentSpec:
           \ num_users+ 1))\n    item_ids = list(range(1, n_items+ 1))\n\n    # select\
           \ which items to use for the training\n    item_entity_df = pd.DataFrame.from_dict(\n\
           \        {\n            'item_id': item_ids,\n            'event_timestamp':\
-          \ [datetime(2025, 1, 1)] * len(item_ids) \n        }\n    )\n    # select\
+          \ [datetime(2025, 1, 1)] * len(item_ids)\n        }\n    )\n    # select\
           \ which users to use for the training\n    user_entity_df = pd.DataFrame.from_dict(\n\
           \        {\n            'user_id': user_ids,\n            'event_timestamp':\
-          \ [datetime(2025, 1, 1)] * len(user_ids) \n        }\n    )\n    # Select\
+          \ [datetime(2025, 1, 1)] * len(user_ids)\n        }\n    )\n    # Select\
           \ which item-user interactions to use for the training\n    item_user_interactions_df\
           \ = pd.read_parquet('./feature_repo/data/interactions_item_user_ids.parquet')\n\
           \    item_user_neg_interactions_df = pd.read_parquet('./feature_repo/data/neg_interactions_item_user_ids.parquet')\n\
