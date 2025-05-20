@@ -50,8 +50,8 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     user_embed_df['event_timestamp'] = datetime.now()
 
     # Push the new embedding to the offline and online store
-    store.push('item_embed_push_source', item_embed_df, to=PushMode.ONLINE)
-    store.push('user_embed_push_source', user_embed_df, to=PushMode.ONLINE)
+    store.push('item_embed_push_source', item_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)
+    store.push('user_embed_push_source', user_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)
 
     # Materilize the online store
     store.materialize_incremental(datetime.now(), feature_views=['item_embedding', 'user_items', 'item_features'])
@@ -66,7 +66,6 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
                 query=user_embed,
                 top_k=k,
                 features=[f'{item_embedding_view}:item_id']
-                # features=[f'{item_embedding_view}:item_id', f'{item_embedding_view}:embeddings']
             ).to_df()['item_id'].to_list()
         )
 
@@ -75,7 +74,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     user_items_df['event_timestamp'] = datetime.now()
     user_items_df['top_k_item_ids'] = item_recommendation
 
-    store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE)
+    store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE, allow_registry_cache=False)
 
 
 @dsl.component(base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}")
