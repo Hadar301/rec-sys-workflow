@@ -1,14 +1,13 @@
-from kfp import dsl, compiler
+from kfp import dsl, compiler, Client
 from typing import List, Dict
 import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model
 
 IMAGE_TAG = '0.0.24'
-# IMAGE_TAG = 'latest'
+BASE_IMAGE = os.getenv("BASE_REC_SYS_IMAGE", f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}")
 
-@dsl.component(
-    base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}")
+@dsl.component(base_image=BASE_IMAGE)
 def generate_candidates(item_input_model: Input[Model], user_input_model: Input[Model], item_df_input: Input[Dataset], user_df_input: Input[Dataset]):
     from feast import FeatureStore
     from feast.data_source import PushMode
@@ -22,16 +21,16 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     import subprocess
 
     result = subprocess.run(
-        ["/bin/bash", "-c", "./entry_point.sh", "&&", "ls"],
+        ["/bin/bash", "-c", "ls && ./entry_point.sh"],
         capture_output=True,  # Capture stdout and stderr
         text=True,           # Return output as strings (not bytes)
         # check=True           # Raise an error if the command fails
     )
-    
+
     # Print the stdout
     print("Standard Output:")
     print(result.stdout)
-    
+
     # Print the stderr (if any)
     print("Standard Error:")
     print(result.stderr)
@@ -90,7 +89,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE, allow_registry_cache=False)
 
 
-@dsl.component(base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}")
+@dsl.component(base_image=BASE_IMAGE)
 def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], interaction_df_input: Input[Dataset], neg_interaction_df_input:Input[Dataset], item_output_model: Output[Model], user_output_model: Output[Model]):
     from models.user_tower import UserTower
     from models.item_tower import ItemTower
@@ -113,8 +112,7 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
     item_output_model.metadata['framework'] = 'pytorch'
     user_output_model.metadata['framework'] = 'pytorch'
 
-@dsl.component(
-    base_image=f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}", packages_to_install=['psycopg2'])
+@dsl.component(base_image=BASE_IMAGE, packages_to_install=['psycopg2'])
 def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output[Dataset], interaction_df_output: Output[Dataset], neg_interaction_df_output: Output[Dataset]):
     from feast import FeatureStore
     from datetime import datetime
@@ -125,18 +123,19 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     import subprocess
 
     result = subprocess.run(
-        ["/bin/bash", "-c", "./entry_point.sh", "&&", "ls"],
+        ["/bin/bash", "-c", "ls && ./entry_point.sh"],
         capture_output=True,  # Capture stdout and stderr
         text=True,           # Return output as strings (not bytes)
     )
-    
+
     # Print the stdout
     print("Standard Output:")
     print(result.stdout)
-    
+
     # Print the stderr (if any)
     print("Standard Error:")
     print(result.stderr)
+
     with open('feature_repo/feature_store.yaml', 'r') as file:
         print(file.read())
     store = FeatureStore(repo_path="feature_repo/")
@@ -216,13 +215,22 @@ def mount_secret_feast_repository(task):
     kubernetes.use_secret_as_env(
         task=task,
         secret_name=os.getenv('DB_SECRET_NAME', 'cluster-sample-app'),
-        secret_key_to_env={'uri': 'uri', 'password': 'DB_PASSWORD'},
+        secret_key_to_env={
+            'uri': 'uri',
+            'password': 'DB_PASSWORD',
+            'host': 'DB_HOST',
+            'dbname': 'DB_NAME',
+            'user': 'DB_USER',
+            'port': 'DB_PORT',
+        },
     )
     kubernetes.use_secret_as_volume(
         task=task,
-        secret_name='feast-feast-edb-rec-sys-registry-tls',
+        secret_name=os.getenv("FEAST_SECRET_NAME", 'feast-feast-edb-rec-sys-registry-tls'),
         mount_path='/app/feature_repo/secrets',
     )
+    task.set_env_variable(name="FEAST_PROJECT_NAME", value=os.getenv("FEAST_PROJECT_NAME", "feast_edb_rec_sys"))
+    task.set_env_variable(name="FEAST_REGISTRY_URL", value=os.getenv("FEAST_REGISTRY_URL", "feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local"))
 
 @dsl.pipeline(name=os.path.basename(__file__).replace(".py", ""))
 def batch_recommendation():
@@ -249,18 +257,47 @@ def batch_recommendation():
     kubernetes.use_secret_as_env(
         task=generate_candidates_task,
         secret_name=os.getenv('DB_SECRET_NAME', 'cluster-sample-app'),
-        secret_key_to_env={'uri': 'uri', 'password': 'DB_PASSWORD'},
+        secret_key_to_env={
+            'uri': 'uri',
+            'password': 'DB_PASSWORD',
+            'host': 'DB_HOST',
+            'dbname': 'DB_NAME',
+            'user': 'DB_USER',
+            'port': 'DB_PORT',
+        },
     )
     kubernetes.use_secret_as_volume(
         task=generate_candidates_task,
-        secret_name='feast-feast-edb-rec-sys-registry-tls',
+        secret_name=os.getenv("FEAST_SECRET_NAME", 'feast-feast-edb-rec-sys-registry-tls'),
         mount_path='/app/feature_repo/secrets',
     )
+    generate_candidates_task.set_env_variable(name="FEAST_PROJECT_NAME", value=os.getenv("FEAST_PROJECT_NAME", "feast_edb_rec_sys"))
+    generate_candidates_task.set_env_variable(name="FEAST_REGISTRY_URL", value=os.getenv("FEAST_REGISTRY_URL", "feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local"))
     generate_candidates_task.set_caching_options(False)
 
 
 if __name__ == "__main__":
+    pipeline_yaml = __file__.replace(".py", ".yaml")
+
     compiler.Compiler().compile(
         pipeline_func=batch_recommendation,
-        package_path=__file__.replace(".py", ".yaml"),
+        package_path=pipeline_yaml
     )
+
+    client = Client(
+      host=os.environ["DS_PIPELINE_URL"],
+      verify_ssl=False
+    )
+
+    uploaded_pipeline = client.upload_pipeline(
+      pipeline_package_path=pipeline_yaml,
+      pipeline_name=os.environ["PIPELINE_NAME"]
+    )
+
+    run = client.create_run_from_pipeline_package(
+      pipeline_file=pipeline_yaml,
+      arguments={},
+      run_name=os.environ["RUN_NAME"]
+    )
+
+    print(f"Pipeline submitted! Run ID: {run.run_id}")
