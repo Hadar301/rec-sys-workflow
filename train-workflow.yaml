@@ -106,22 +106,22 @@ deploymentSpec:
           \ import UserTower\n    from models.item_tower import ItemTower\n    import\
           \ pandas as pd\n    import numpy as np\n    from datetime import datetime\n\
           \    import torch\n    import subprocess\n\n    result = subprocess.run(\n\
-          \        [\"/bin/bash\", \"-c\", \"ls && ./entrypoint.sh\"],\n        capture_output=True,\
-          \  # Capture stdout and stderr\n        text=True,           # Return output\
-          \ as strings (not bytes)\n        check=True           # Raise an error\
-          \ if the command fails\n    )\n\n    # Print the stdout\n    print(\"Standard\
-          \ Output:\")\n    print(result.stdout)\n\n    # Print the stderr (if any)\n\
-          \    print(\"Standard Error:\")\n    print(result.stderr)\n    with open('feature_repo/feature_store.yaml',\
-          \ 'r') as file:\n        print(file.read())\n\n    store = FeatureStore(repo_path=\"\
-          feature_repo/\")\n\n    item_encoder = ItemTower()\n    user_encoder = UserTower()\n\
-          \    item_encoder.load_state_dict(torch.load(item_input_model.path))\n \
-          \   user_encoder.load_state_dict(torch.load(user_input_model.path))\n  \
-          \  item_encoder.eval()\n    user_encoder.eval()\n    # load item and user\
-          \ dataframes\n    item_df = pd.read_parquet(item_df_input.path)\n    user_df\
-          \ = pd.read_parquet(user_df_input.path)\n\n    # Create a new table to be\
-          \ push to the online store\n    item_embed_df = item_df[['item_id']].copy()\n\
-          \    user_embed_df = user_df[['user_id']].copy()\n\n    # Encode the items\
-          \ and users\n    item_embed_df['embedding'] = item_encoder(**data_preproccess(item_df)).detach().numpy().tolist()\n\
+          \        [\"/bin/bash\", \"-c\", \"./entry_point.sh\", \"&&\", \"ls\"],\n\
+          \        capture_output=True,  # Capture stdout and stderr\n        text=True,\
+          \           # Return output as strings (not bytes)\n        # check=True\
+          \           # Raise an error if the command fails\n    )\n\n    # Print\
+          \ the stdout\n    print(\"Standard Output:\")\n    print(result.stdout)\n\
+          \n    # Print the stderr (if any)\n    print(\"Standard Error:\")\n    print(result.stderr)\n\
+          \    with open('feature_repo/feature_store.yaml', 'r') as file:\n      \
+          \  print(file.read())\n\n    store = FeatureStore(repo_path=\"feature_repo/\"\
+          )\n\n    item_encoder = ItemTower()\n    user_encoder = UserTower()\n  \
+          \  item_encoder.load_state_dict(torch.load(item_input_model.path))\n   \
+          \ user_encoder.load_state_dict(torch.load(user_input_model.path))\n    item_encoder.eval()\n\
+          \    user_encoder.eval()\n    # load item and user dataframes\n    item_df\
+          \ = pd.read_parquet(item_df_input.path)\n    user_df = pd.read_parquet(user_df_input.path)\n\
+          \n    # Create a new table to be push to the online store\n    item_embed_df\
+          \ = item_df[['item_id']].copy()\n    user_embed_df = user_df[['user_id']].copy()\n\
+          \n    # Encode the items and users\n    item_embed_df['embedding'] = item_encoder(**data_preproccess(item_df)).detach().numpy().tolist()\n\
           \    user_embed_df['embedding'] = user_encoder(**data_preproccess(user_df)).detach().numpy().tolist()\n\
           \n    # Add the currnet timestamp\n    item_embed_df['event_timestamp']\
           \ = datetime.now()\n    user_embed_df['event_timestamp'] = datetime.now()\n\
@@ -140,7 +140,7 @@ deploymentSpec:
           \    user_items_df['event_timestamp'] = datetime.now()\n    user_items_df['top_k_item_ids']\
           \ = item_recommendation\n\n    store.push('user_items_push_source', user_items_df,\
           \ to=PushMode.ONLINE, allow_registry_cache=False)\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.23
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.24
     exec-load-data-from-feast:
       container:
         args:
@@ -173,22 +173,20 @@ deploymentSpec:
           \ Output[Dataset]):\n    from feast import FeatureStore\n    from datetime\
           \ import datetime\n    import pandas as pd\n    import os\n    import psycopg2\n\
           \    from sqlalchemy import create_engine, text\n    import subprocess\n\
-          \n    result = subprocess.run(\n        [\"/bin/bash\", \"-c\", \"ls &&\
-          \ ./entrypoint.sh\"],\n        capture_output=True,  # Capture stdout and\
-          \ stderr\n        text=True,           # Return output as strings (not bytes)\n\
-          \        check=True           # Raise an error if the command fails\n  \
-          \  )\n\n    # Print the stdout\n    print(\"Standard Output:\")\n    print(result.stdout)\n\
+          \n    result = subprocess.run(\n        [\"/bin/bash\", \"-c\", \"./entry_point.sh\"\
+          , \"&&\", \"ls\"],\n        capture_output=True,  # Capture stdout and stderr\n\
+          \        text=True,           # Return output as strings (not bytes)\n \
+          \   )\n\n    # Print the stdout\n    print(\"Standard Output:\")\n    print(result.stdout)\n\
           \n    # Print the stderr (if any)\n    print(\"Standard Error:\")\n    print(result.stderr)\n\
-          \    print(f'MyTest: {os.listdir(\".\")}')\n    print(f'MyTest2: {os.listdir(\"\
-          feature_repo/\")}')\n    print(f'MyTest3: {os.listdir(\"feature_repo/secrets\"\
-          )}')\n    store = FeatureStore(repo_path=\"feature_repo/\")\n    # load\
-          \ feature services\n    item_service = store.get_feature_service(\"item_service\"\
-          )\n    user_service = store.get_feature_service(\"user_service\")\n    interaction_service\
-          \ = store.get_feature_service(\"interaction_service\")\n    neg_interactions_service\
-          \ = store.get_feature_service('neg_interaction_service')\n\n    num_users\
-          \ = 1_000\n    n_items = 5_000\n\n    user_ids = list(range(1, num_users+\
-          \ 1))\n    item_ids = list(range(1, n_items+ 1))\n\n    # select which items\
-          \ to use for the training\n    item_entity_df = pd.DataFrame.from_dict(\n\
+          \    with open('feature_repo/feature_store.yaml', 'r') as file:\n      \
+          \  print(file.read())\n    store = FeatureStore(repo_path=\"feature_repo/\"\
+          )\n    store.refresh_registry()\n    # load feature services\n    item_service\
+          \ = store.get_feature_service(\"item_service\")\n    user_service = store.get_feature_service(\"\
+          user_service\")\n    interaction_service = store.get_feature_service(\"\
+          interaction_service\")\n    neg_interactions_service = store.get_feature_service('neg_interaction_service')\n\
+          \n    num_users = 1_000\n    n_items = 5_000\n\n    user_ids = list(range(1,\
+          \ num_users+ 1))\n    item_ids = list(range(1, n_items+ 1))\n\n    # select\
+          \ which items to use for the training\n    item_entity_df = pd.DataFrame.from_dict(\n\
           \        {\n            'item_id': item_ids,\n            'event_timestamp':\
           \ [datetime(2025, 1, 1)] * len(item_ids)\n        }\n    )\n    # select\
           \ which users to use for the training\n    user_entity_df = pd.DataFrame.from_dict(\n\
@@ -222,7 +220,7 @@ deploymentSpec:
           \   item_df_output.metadata['format'] = 'parquet'\n    user_df_output.metadata['format']\
           \ = 'parquet'\n    interaction_df_output.metadata['format'] = 'parquet'\n\
           \    neg_interaction_df_output.metadata['format'] = 'parquet'\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.23
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.24
     exec-train-model:
       container:
         args:
@@ -264,7 +262,7 @@ deploymentSpec:
           \ torch.save(user_encoder.state_dict(), user_output_model.path)\n    item_output_model.metadata['framework']\
           \ = 'pytorch'\n    user_output_model.metadata['framework'] = 'pytorch'\n\
           \n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.23
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.24
 pipelineInfo:
   name: train-workflow
 root:

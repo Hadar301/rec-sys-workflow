@@ -4,7 +4,7 @@ import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model
 
-IMAGE_TAG = '0.0.23'
+IMAGE_TAG = '0.0.24'
 # IMAGE_TAG = 'latest'
 
 @dsl.component(
@@ -22,10 +22,10 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     import subprocess
 
     result = subprocess.run(
-        ["/bin/bash", "-c", "ls && ./entrypoint.sh"],
+        ["/bin/bash", "-c", "./entry_point.sh", "&&", "ls"],
         capture_output=True,  # Capture stdout and stderr
         text=True,           # Return output as strings (not bytes)
-        check=True           # Raise an error if the command fails
+        # check=True           # Raise an error if the command fails
     )
     
     # Print the stdout
@@ -125,10 +125,9 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     import subprocess
 
     result = subprocess.run(
-        ["/bin/bash", "-c", "ls && ./entrypoint.sh"],
+        ["/bin/bash", "-c", "./entry_point.sh", "&&", "ls"],
         capture_output=True,  # Capture stdout and stderr
         text=True,           # Return output as strings (not bytes)
-        check=True           # Raise an error if the command fails
     )
     
     # Print the stdout
@@ -138,10 +137,10 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     # Print the stderr (if any)
     print("Standard Error:")
     print(result.stderr)
-    print(f'MyTest: {os.listdir(".")}')
-    print(f'MyTest2: {os.listdir("feature_repo/")}')
-    print(f'MyTest3: {os.listdir("feature_repo/secrets")}')
+    with open('feature_repo/feature_store.yaml', 'r') as file:
+        print(file.read())
     store = FeatureStore(repo_path="feature_repo/")
+    store.refresh_registry()
     # load feature services
     item_service = store.get_feature_service("item_service")
     user_service = store.get_feature_service("user_service")
