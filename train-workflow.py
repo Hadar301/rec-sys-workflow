@@ -21,7 +21,20 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     import torch
     import subprocess
 
-    subprocess.run(["/bin/bash", "-c", "ls", "&&","./entrypoint.sh"], check=True)
+    result = subprocess.run(
+        ["/bin/bash", "-c", "ls && ./entrypoint.sh"],
+        capture_output=True,  # Capture stdout and stderr
+        text=True,           # Return output as strings (not bytes)
+        check=True           # Raise an error if the command fails
+    )
+    
+    # Print the stdout
+    print("Standard Output:")
+    print(result.stdout)
+    
+    # Print the stderr (if any)
+    print("Standard Error:")
+    print(result.stderr)
     with open('feature_repo/feature_store.yaml', 'r') as file:
         print(file.read())
 
@@ -111,9 +124,20 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     from sqlalchemy import create_engine, text
     import subprocess
 
-    subprocess.run(["/bin/bash", "-c", "ls", "&&","./entrypoint.sh"], check=True)
-    with open('feature_repo/feature_store.yaml', 'r') as file:
-        print(file.read())
+    result = subprocess.run(
+        ["/bin/bash", "-c", "ls && ./entrypoint.sh"],
+        capture_output=True,  # Capture stdout and stderr
+        text=True,           # Return output as strings (not bytes)
+        check=True           # Raise an error if the command fails
+    )
+    
+    # Print the stdout
+    print("Standard Output:")
+    print(result.stdout)
+    
+    # Print the stderr (if any)
+    print("Standard Error:")
+    print(result.stderr)
     print(f'MyTest: {os.listdir(".")}')
     print(f'MyTest2: {os.listdir("feature_repo/")}')
     print(f'MyTest3: {os.listdir("feature_repo/secrets")}')
