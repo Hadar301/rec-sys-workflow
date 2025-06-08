@@ -4,7 +4,7 @@ import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model
 
-IMAGE_TAG = '0.0.24'
+IMAGE_TAG = '0.0.26'
 BASE_IMAGE = os.getenv("BASE_REC_SYS_IMAGE", f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}")
 
 @dsl.component(base_image=BASE_IMAGE)
@@ -12,8 +12,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     from feast import FeatureStore
     from feast.data_source import PushMode
     from models.data_util import data_preproccess
-    from models.user_tower import UserTower
-    from models.item_tower import ItemTower
+    from models.entity_tower.py import EntityTower
     import pandas as pd
     import numpy as np
     from datetime import datetime
@@ -39,8 +38,8 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
 
     store = FeatureStore(repo_path="feature_repo/")
 
-    item_encoder = ItemTower()
-    user_encoder = UserTower()
+    item_encoder = EntityTower()
+    user_encoder = EntityTower()
     item_encoder.load_state_dict(torch.load(item_input_model.path))
     user_encoder.load_state_dict(torch.load(user_input_model.path))
     item_encoder.eval()
@@ -90,22 +89,16 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
 
 
 @dsl.component(base_image=BASE_IMAGE)
-def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], interaction_df_input: Input[Dataset], neg_interaction_df_input:Input[Dataset], item_output_model: Output[Model], user_output_model: Output[Model]):
-    from models.user_tower import UserTower
-    from models.item_tower import ItemTower
-    from models.train_two_tower import train_two_tower
+def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], interaction_df_input: Input[Dataset], item_output_model: Output[Model], user_output_model: Output[Model]):
+    from models.train_two_tower import create_and_train_two_tower
     import pandas as pd
     import torch
-    dim = 64
 
     item_df = pd.read_parquet(item_df_input.path)
     user_df = pd.read_parquet(user_df_input.path)
     interaction_df = pd.read_parquet(interaction_df_input.path)
-    neg_interaction_df = pd.read_parquet(neg_interaction_df_input.path)
 
-    item_encoder = ItemTower(dim)
-    user_encoder = UserTower(dim)
-    train_two_tower(item_encoder, user_encoder, item_df, user_df, interaction_df, neg_interaction_df)
+    item_encoder, user_encoder = create_and_train_two_tower(item_df, user_df, interaction_df)
 
     torch.save(item_encoder.state_dict(), item_output_model.path)
     torch.save(user_encoder.state_dict(), user_output_model.path)
@@ -113,7 +106,7 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
     user_output_model.metadata['framework'] = 'pytorch'
 
 @dsl.component(base_image=BASE_IMAGE, packages_to_install=['psycopg2'])
-def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output[Dataset], interaction_df_output: Output[Dataset], neg_interaction_df_output: Output[Dataset]):
+def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output[Dataset], interaction_df_output: Output[Dataset]):
     from feast import FeatureStore
     from datetime import datetime
     import pandas as pd
@@ -144,7 +137,6 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     item_service = store.get_feature_service("item_service")
     user_service = store.get_feature_service("user_service")
     interaction_service = store.get_feature_service("interaction_service")
-    neg_interactions_service = store.get_feature_service('neg_interaction_service')
 
     num_users = 1_000
     n_items = 5_000
@@ -168,15 +160,12 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     )
     # Select which item-user interactions to use for the training
     item_user_interactions_df = pd.read_parquet('./feature_repo/data/interactions_item_user_ids.parquet')
-    item_user_neg_interactions_df = pd.read_parquet('./feature_repo/data/neg_interactions_item_user_ids.parquet')
     item_user_interactions_df['event_timestamp'] = datetime(2025, 1, 1)
-    item_user_neg_interactions_df['event_timestamp'] = datetime(2025, 1, 1)
 
     # retrive datasets for training
     item_df = store.get_historical_features(entity_df=item_entity_df, features=item_service).to_df()
     user_df = store.get_historical_features(entity_df=user_entity_df, features=user_service).to_df()
     interaction_df = store.get_historical_features(entity_df=item_user_interactions_df, features=interaction_service).to_df()
-    neg_interaction_df = store.get_historical_features(entity_df=item_user_neg_interactions_df, features=neg_interactions_service).to_df()
 
     uri = os.getenv('uri', None)
     engine = create_engine(uri)
@@ -187,14 +176,14 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
             result = connection.execute(query, {"table_name": table_name}).scalar()
             return result > 0
 
-    if table_exists(engine, 'stream_interaction_negetive'):
-        query_negative = 'SELECT * FROM stream_interaction_negetive'
-        stream_negetive_inter_df = pd.read_sql(query_negative, engine).rename(columns={'timestamp':'event_timestamp'})
+    if table_exists(engine, 'new_users'):
+        query_new_users = 'SELECT * FROM new_users'
+        stream_users_df = pd.read_sql(query_new_users, engine).rename(columns={'timestamp':'signup_date'})
 
-        neg_interaction_df = pd.concat([neg_interaction_df, stream_negetive_inter_df], axis=0)
+        user_df = pd.concat([user_df, stream_users_df], axis=0)
 
-    if table_exists(engine, 'stream_interaction_positive'):
-        query_positive = 'SELECT * FROM stream_interaction_positive'
+    if table_exists(engine, 'stream_interaction'):
+        query_positive = 'SELECT * FROM stream_interaction'
         stream_positive_inter_df = pd.read_sql(query_positive, engine).rename(columns={'timestamp':'event_timestamp'})
 
         interaction_df = pd.concat([interaction_df, stream_positive_inter_df], axis=0)
@@ -203,12 +192,10 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     item_df.to_parquet(item_df_output.path)
     user_df.to_parquet(user_df_output.path)
     interaction_df.to_parquet(interaction_df_output.path)
-    neg_interaction_df.to_parquet(neg_interaction_df_output.path)
 
     item_df_output.metadata['format'] = 'parquet'
     user_df_output.metadata['format'] = 'parquet'
     interaction_df_output.metadata['format'] = 'parquet'
-    neg_interaction_df_output.metadata['format'] = 'parquet'
 
 
 def mount_secret_feast_repository(task):
@@ -244,7 +231,6 @@ def batch_recommendation():
         item_df_input=load_data_task.outputs['item_df_output'],
         user_df_input=load_data_task.outputs['user_df_output'],
         interaction_df_input=load_data_task.outputs['interaction_df_output'],
-        neg_interaction_df_input=load_data_task.outputs['neg_interaction_df_output'],
     ).after(load_data_task)
     train_model_task.set_caching_options(False)
 
@@ -284,20 +270,20 @@ if __name__ == "__main__":
         package_path=pipeline_yaml
     )
 
-    client = Client(
-      host=os.environ["DS_PIPELINE_URL"],
-      verify_ssl=False
-    )
+    # client = Client(
+    #   host=os.environ["DS_PIPELINE_URL"],
+    #   verify_ssl=False
+    # )
 
-    uploaded_pipeline = client.upload_pipeline(
-      pipeline_package_path=pipeline_yaml,
-      pipeline_name=os.environ["PIPELINE_NAME"]
-    )
+    # uploaded_pipeline = client.upload_pipeline(
+    #   pipeline_package_path=pipeline_yaml,
+    #   pipeline_name=os.environ["PIPELINE_NAME"]
+    # )
 
-    run = client.create_run_from_pipeline_package(
-      pipeline_file=pipeline_yaml,
-      arguments={},
-      run_name=os.environ["RUN_NAME"]
-    )
+    # run = client.create_run_from_pipeline_package(
+    #   pipeline_file=pipeline_yaml,
+    #   arguments={},
+    #   run_name=os.environ["RUN_NAME"]
+    # )
 
-    print(f"Pipeline submitted! Run ID: {run.run_id}")
+    # print(f"Pipeline submitted! Run ID: {run.run_id}")
