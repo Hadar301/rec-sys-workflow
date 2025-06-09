@@ -2,22 +2,26 @@ from kfp import dsl, compiler, Client
 from typing import List, Dict
 import os
 from kfp import kubernetes
-from kfp.dsl import Input, Output, Dataset, Model
+from kfp.dsl import Input, Output, Dataset, Model, Artifact
 
-IMAGE_TAG = '0.0.26'
+IMAGE_TAG = '0.0.40'
 BASE_IMAGE = os.getenv("BASE_REC_SYS_IMAGE", f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}")
 
 @dsl.component(base_image=BASE_IMAGE)
-def generate_candidates(item_input_model: Input[Model], user_input_model: Input[Model], item_df_input: Input[Dataset], user_df_input: Input[Dataset]):
+def generate_candidates(item_input_model: Input[Model], user_input_model: Input[Model], item_df_input: Input[Dataset], user_df_input: Input[Dataset], models_definition_input: Input[Artifact]):
     from feast import FeatureStore
     from feast.data_source import PushMode
     from models.data_util import data_preproccess
-    from models.entity_tower.py import EntityTower
+    from models.entity_tower import EntityTower
     import pandas as pd
     import numpy as np
     from datetime import datetime
     import torch
     import subprocess
+    import json
+    
+    with open(models_definition_input.path, 'r') as f:
+        models_definition :dict = json.load(f)
 
     result = subprocess.run(
         ["/bin/bash", "-c", "ls && ./entry_point.sh"],
@@ -38,8 +42,8 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
 
     store = FeatureStore(repo_path="feature_repo/")
 
-    item_encoder = EntityTower()
-    user_encoder = EntityTower()
+    item_encoder = EntityTower(models_definition['items_num_numerical'], models_definition['items_num_categorical'])
+    user_encoder = EntityTower(models_definition['users_num_numerical'], models_definition['users_num_categorical'])
     item_encoder.load_state_dict(torch.load(item_input_model.path))
     user_encoder.load_state_dict(torch.load(user_input_model.path))
     item_encoder.eval()
@@ -89,21 +93,24 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
 
 
 @dsl.component(base_image=BASE_IMAGE)
-def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], interaction_df_input: Input[Dataset], item_output_model: Output[Model], user_output_model: Output[Model]):
+def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], interaction_df_input: Input[Dataset], item_output_model: Output[Model], user_output_model: Output[Model], models_definition_output: Output[Artifact]):
     from models.train_two_tower import create_and_train_two_tower
     import pandas as pd
     import torch
+    import json
 
     item_df = pd.read_parquet(item_df_input.path)
     user_df = pd.read_parquet(user_df_input.path)
     interaction_df = pd.read_parquet(interaction_df_input.path)
 
-    item_encoder, user_encoder = create_and_train_two_tower(item_df, user_df, interaction_df)
+    item_encoder, user_encoder, models_definition= create_and_train_two_tower(item_df, user_df, interaction_df, return_model_definition=True)
 
     torch.save(item_encoder.state_dict(), item_output_model.path)
     torch.save(user_encoder.state_dict(), user_output_model.path)
     item_output_model.metadata['framework'] = 'pytorch'
     user_output_model.metadata['framework'] = 'pytorch'
+    with open(models_definition_output.path, 'w') as f:
+        json.dump(models_definition, f)
 
 @dsl.component(base_image=BASE_IMAGE, packages_to_install=['psycopg2'])
 def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output[Dataset], interaction_df_output: Output[Dataset]):
@@ -133,16 +140,15 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
         print(file.read())
     store = FeatureStore(repo_path="feature_repo/")
     store.refresh_registry()
+    print('registry refreshed')
     # load feature services
     item_service = store.get_feature_service("item_service")
     user_service = store.get_feature_service("user_service")
     interaction_service = store.get_feature_service("interaction_service")
 
-    num_users = 1_000
-    n_items = 5_000
-
-    user_ids = list(range(1, num_users+ 1))
-    item_ids = list(range(1, n_items+ 1))
+    users_ids = pd.read_parquet('./feature_repo/data/recommendation_interactions.parquet')
+    user_ids = users_ids['user_id'].unique().tolist()
+    item_ids = users_ids['item_id'].unique().tolist()
 
     # select which items to use for the training
     item_entity_df = pd.DataFrame.from_dict(
@@ -239,6 +245,7 @@ def batch_recommendation():
         user_input_model=train_model_task.outputs['user_output_model'],
         item_df_input=load_data_task.outputs['item_df_output'],
         user_df_input=load_data_task.outputs['user_df_output'],
+        models_definition_input=train_model_task.outputs['models_definition_output'],
     ).after(train_model_task)
     kubernetes.use_secret_as_env(
         task=generate_candidates_task,

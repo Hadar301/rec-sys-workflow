@@ -13,6 +13,10 @@ components:
           artifactType:
             schemaTitle: system.Model
             schemaVersion: 0.0.1
+        models_definition_input:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
         user_df_input:
           artifactType:
             schemaTitle: system.Dataset
@@ -59,6 +63,10 @@ components:
           artifactType:
             schemaTitle: system.Model
             schemaVersion: 0.0.1
+        models_definition_output:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
         user_output_model:
           artifactType:
             schemaTitle: system.Model
@@ -92,23 +100,26 @@ deploymentSpec:
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef generate_candidates(item_input_model: Input[Model], user_input_model:\
-          \ Input[Model], item_df_input: Input[Dataset], user_df_input: Input[Dataset]):\n\
-          \    from feast import FeatureStore\n    from feast.data_source import PushMode\n\
-          \    from models.data_util import data_preproccess\n    from models.entity_tower.py\
-          \ import EntityTower\n    import pandas as pd\n    import numpy as np\n\
-          \    from datetime import datetime\n    import torch\n    import subprocess\n\
-          \n    result = subprocess.run(\n        [\"/bin/bash\", \"-c\", \"ls &&\
-          \ ./entry_point.sh\"],\n        capture_output=True,  # Capture stdout and\
-          \ stderr\n        text=True,           # Return output as strings (not bytes)\n\
-          \        # check=True           # Raise an error if the command fails\n\
-          \    )\n\n    # Print the stdout\n    print(\"Standard Output:\")\n    print(result.stdout)\n\
-          \n    # Print the stderr (if any)\n    print(\"Standard Error:\")\n    print(result.stderr)\n\
-          \    with open('feature_repo/feature_store.yaml', 'r') as file:\n      \
-          \  print(file.read())\n\n    store = FeatureStore(repo_path=\"feature_repo/\"\
-          )\n\n    item_encoder = EntityTower()\n    user_encoder = EntityTower()\n\
-          \    item_encoder.load_state_dict(torch.load(item_input_model.path))\n \
-          \   user_encoder.load_state_dict(torch.load(user_input_model.path))\n  \
-          \  item_encoder.eval()\n    user_encoder.eval()\n    # load item and user\
+          \ Input[Model], item_df_input: Input[Dataset], user_df_input: Input[Dataset],\
+          \ models_definition_input: Input[Artifact]):\n    from feast import FeatureStore\n\
+          \    from feast.data_source import PushMode\n    from models.data_util import\
+          \ data_preproccess\n    from models.entity_tower import EntityTower\n  \
+          \  import pandas as pd\n    import numpy as np\n    from datetime import\
+          \ datetime\n    import torch\n    import subprocess\n    import json\n\n\
+          \    with open(models_definition_input.path, 'r') as f:\n        models_definition\
+          \ :dict = json.load(f)\n\n    result = subprocess.run(\n        [\"/bin/bash\"\
+          , \"-c\", \"ls && ./entry_point.sh\"],\n        capture_output=True,  #\
+          \ Capture stdout and stderr\n        text=True,           # Return output\
+          \ as strings (not bytes)\n        # check=True           # Raise an error\
+          \ if the command fails\n    )\n\n    # Print the stdout\n    print(\"Standard\
+          \ Output:\")\n    print(result.stdout)\n\n    # Print the stderr (if any)\n\
+          \    print(\"Standard Error:\")\n    print(result.stderr)\n    with open('feature_repo/feature_store.yaml',\
+          \ 'r') as file:\n        print(file.read())\n\n    store = FeatureStore(repo_path=\"\
+          feature_repo/\")\n\n    item_encoder = EntityTower(models_definition['items_num_numerical'],\
+          \ models_definition['items_num_categorical'])\n    user_encoder = EntityTower(models_definition['users_num_numerical'],\
+          \ models_definition['users_num_categorical'])\n    item_encoder.load_state_dict(torch.load(item_input_model.path))\n\
+          \    user_encoder.load_state_dict(torch.load(user_input_model.path))\n \
+          \   item_encoder.eval()\n    user_encoder.eval()\n    # load item and user\
           \ dataframes\n    item_df = pd.read_parquet(item_df_input.path)\n    user_df\
           \ = pd.read_parquet(user_df_input.path)\n\n    # Create a new table to be\
           \ push to the online store\n    item_embed_df = item_df[['item_id']].copy()\n\
@@ -137,7 +148,7 @@ deploymentSpec:
           value: feast_edb_rec_sys
         - name: FEAST_REGISTRY_URL
           value: feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.24
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.40
     exec-load-data-from-feast:
       container:
         args:
@@ -177,14 +188,15 @@ deploymentSpec:
           \ (if any)\n    print(\"Standard Error:\")\n    print(result.stderr)\n\n\
           \    with open('feature_repo/feature_store.yaml', 'r') as file:\n      \
           \  print(file.read())\n    store = FeatureStore(repo_path=\"feature_repo/\"\
-          )\n    store.refresh_registry()\n    # load feature services\n    item_service\
-          \ = store.get_feature_service(\"item_service\")\n    user_service = store.get_feature_service(\"\
-          user_service\")\n    interaction_service = store.get_feature_service(\"\
-          interaction_service\")\n\n    num_users = 1_000\n    n_items = 5_000\n\n\
-          \    user_ids = list(range(1, num_users+ 1))\n    item_ids = list(range(1,\
-          \ n_items+ 1))\n\n    # select which items to use for the training\n   \
-          \ item_entity_df = pd.DataFrame.from_dict(\n        {\n            'item_id':\
-          \ item_ids,\n            'event_timestamp': [datetime(2025, 1, 1)] * len(item_ids)\n\
+          )\n    store.refresh_registry()\n    print('registry refreshed')\n    #\
+          \ load feature services\n    item_service = store.get_feature_service(\"\
+          item_service\")\n    user_service = store.get_feature_service(\"user_service\"\
+          )\n    interaction_service = store.get_feature_service(\"interaction_service\"\
+          )\n\n    users_ids = pd.read_parquet('./feature_repo/data/recommendation_interactions.parquet')\n\
+          \    user_ids = users_ids['user_id'].unique().tolist()\n    item_ids = users_ids['item_id'].unique().tolist()\n\
+          \n    # select which items to use for the training\n    item_entity_df =\
+          \ pd.DataFrame.from_dict(\n        {\n            'item_id': item_ids,\n\
+          \            'event_timestamp': [datetime(2025, 1, 1)] * len(item_ids)\n\
           \        }\n    )\n    # select which users to use for the training\n  \
           \  user_entity_df = pd.DataFrame.from_dict(\n        {\n            'user_id':\
           \ user_ids,\n            'event_timestamp': [datetime(2025, 1, 1)] * len(user_ids)\n\
@@ -217,7 +229,7 @@ deploymentSpec:
           value: feast_edb_rec_sys
         - name: FEAST_REGISTRY_URL
           value: feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.24
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.40
     exec-train-model:
       container:
         args:
@@ -246,16 +258,18 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset],\
           \ interaction_df_input: Input[Dataset], item_output_model: Output[Model],\
-          \ user_output_model: Output[Model]):\n    from models.train_two_tower import\
-          \ create_and_train_two_tower\n    import pandas as pd\n    import torch\n\
-          \n    item_df = pd.read_parquet(item_df_input.path)\n    user_df = pd.read_parquet(user_df_input.path)\n\
+          \ user_output_model: Output[Model], models_definition_output: Output[Artifact]):\n\
+          \    from models.train_two_tower import create_and_train_two_tower\n   \
+          \ import pandas as pd\n    import torch\n    import json\n\n    item_df\
+          \ = pd.read_parquet(item_df_input.path)\n    user_df = pd.read_parquet(user_df_input.path)\n\
           \    interaction_df = pd.read_parquet(interaction_df_input.path)\n\n   \
-          \ item_encoder, user_encoder = create_and_train_two_tower(item_df, user_df,\
-          \ interaction_df)\n\n    torch.save(item_encoder.state_dict(), item_output_model.path)\n\
-          \    torch.save(user_encoder.state_dict(), user_output_model.path)\n   \
-          \ item_output_model.metadata['framework'] = 'pytorch'\n    user_output_model.metadata['framework']\
-          \ = 'pytorch'\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.24
+          \ item_encoder, user_encoder, models_definition= create_and_train_two_tower(item_df,\
+          \ user_df, interaction_df, return_model_definition=True)\n\n    torch.save(item_encoder.state_dict(),\
+          \ item_output_model.path)\n    torch.save(user_encoder.state_dict(), user_output_model.path)\n\
+          \    item_output_model.metadata['framework'] = 'pytorch'\n    user_output_model.metadata['framework']\
+          \ = 'pytorch'\n    with open(models_definition_output.path, 'w') as f:\n\
+          \        json.dump(models_definition, f)\n\n"
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.40
 pipelineInfo:
   name: train-workflow
 root:
@@ -277,6 +291,10 @@ root:
             item_input_model:
               taskOutputArtifact:
                 outputArtifactKey: item_output_model
+                producerTask: train-model
+            models_definition_input:
+              taskOutputArtifact:
+                outputArtifactKey: models_definition_output
                 producerTask: train-model
             user_df_input:
               taskOutputArtifact:
