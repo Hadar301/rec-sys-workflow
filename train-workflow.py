@@ -41,24 +41,33 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
         print(file.read())
 
     store = FeatureStore(repo_path="feature_repo/")
-
+    
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cpu')
     item_encoder = EntityTower(models_definition['items_num_numerical'], models_definition['items_num_categorical'])
     user_encoder = EntityTower(models_definition['users_num_numerical'], models_definition['users_num_categorical'])
     item_encoder.load_state_dict(torch.load(item_input_model.path))
     user_encoder.load_state_dict(torch.load(user_input_model.path))
+    item_encoder.to(device)
+    user_encoder.to(device)
     item_encoder.eval()
     user_encoder.eval()
     # load item and user dataframes
     item_df = pd.read_parquet(item_df_input.path)
     user_df = pd.read_parquet(user_df_input.path)
-
+    
     # Create a new table to be push to the online store
     item_embed_df = item_df[['item_id']].copy()
     user_embed_df = user_df[['user_id']].copy()
 
     # Encode the items and users
-    item_embed_df['embedding'] = item_encoder(**data_preproccess(item_df)).detach().numpy().tolist()
-    user_embed_df['embedding'] = user_encoder(**data_preproccess(user_df)).detach().numpy().tolist()
+    proccessed_items = data_preproccess(item_df)
+    proccessed_users = data_preproccess(user_df)
+    # Move tensors to device
+    proccessed_items = {key: value.to(device) if type(value) == torch.Tensor else value for key, value in proccessed_items.items()}
+    proccessed_users = {key: value.to(device) if type(value) == torch.Tensor else value for key, value in proccessed_users.items()}
+    item_embed_df['embedding'] = item_encoder(**proccessed_items).detach().numpy().tolist()
+    user_embed_df['embedding'] = user_encoder(**proccessed_users).detach().numpy().tolist()
 
     # Add the currnet timestamp
     item_embed_df['event_timestamp'] = datetime.now()
@@ -67,6 +76,12 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     # Push the new embedding to the offline and online store
     store.push('item_embed_push_source', item_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)
     store.push('user_embed_push_source', user_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)
+    
+    # Store the embedding of text features for search by text
+    item_text_features_embed = item_df[['item_id']].copy()
+    item_text_features_embed[''] = proccessed_items['text_features']
+    item_text_features_embed[''] = proccessed_items['text_features']
+    
 
     # Materilize the online store
     store.materialize_incremental(datetime.now(), feature_views=['item_embedding', 'user_items', 'item_features'])
