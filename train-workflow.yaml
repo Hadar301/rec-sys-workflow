@@ -115,25 +115,39 @@ deploymentSpec:
           \ Output:\")\n    print(result.stdout)\n\n    # Print the stderr (if any)\n\
           \    print(\"Standard Error:\")\n    print(result.stderr)\n    with open('feature_repo/feature_store.yaml',\
           \ 'r') as file:\n        print(file.read())\n\n    store = FeatureStore(repo_path=\"\
-          feature_repo/\")\n\n    item_encoder = EntityTower(models_definition['items_num_numerical'],\
+          feature_repo/\")\n\n    # device = torch.device('cuda' if torch.cuda.is_available()\
+          \ else 'cpu')\n    device = torch.device('cpu')\n    item_encoder = EntityTower(models_definition['items_num_numerical'],\
           \ models_definition['items_num_categorical'])\n    user_encoder = EntityTower(models_definition['users_num_numerical'],\
           \ models_definition['users_num_categorical'])\n    item_encoder.load_state_dict(torch.load(item_input_model.path))\n\
           \    user_encoder.load_state_dict(torch.load(user_input_model.path))\n \
-          \   item_encoder.eval()\n    user_encoder.eval()\n    # load item and user\
-          \ dataframes\n    item_df = pd.read_parquet(item_df_input.path)\n    user_df\
-          \ = pd.read_parquet(user_df_input.path)\n\n    # Create a new table to be\
-          \ push to the online store\n    item_embed_df = item_df[['item_id']].copy()\n\
-          \    user_embed_df = user_df[['user_id']].copy()\n\n    # Encode the items\
-          \ and users\n    item_embed_df['embedding'] = item_encoder(**data_preproccess(item_df)).detach().numpy().tolist()\n\
-          \    user_embed_df['embedding'] = user_encoder(**data_preproccess(user_df)).detach().numpy().tolist()\n\
-          \n    # Add the currnet timestamp\n    item_embed_df['event_timestamp']\
-          \ = datetime.now()\n    user_embed_df['event_timestamp'] = datetime.now()\n\
-          \n    # Push the new embedding to the offline and online store\n    store.push('item_embed_push_source',\
+          \   item_encoder.to(device)\n    user_encoder.to(device)\n    item_encoder.eval()\n\
+          \    user_encoder.eval()\n    # load item and user dataframes\n    item_df\
+          \ = pd.read_parquet(item_df_input.path)\n    user_df = pd.read_parquet(user_df_input.path)\n\
+          \n    # Create a new table to be push to the online store\n    item_embed_df\
+          \ = item_df[['item_id']].copy()\n    user_embed_df = user_df[['user_id']].copy()\n\
+          \n    # Encode the items and users\n    proccessed_items = data_preproccess(item_df)\n\
+          \    proccessed_users = data_preproccess(user_df)\n    # Move tensors to\
+          \ device\n    proccessed_items = {key: value.to(device) if type(value) ==\
+          \ torch.Tensor else value for key, value in proccessed_items.items()}\n\
+          \    proccessed_users = {key: value.to(device) if type(value) == torch.Tensor\
+          \ else value for key, value in proccessed_users.items()}\n    item_embed_df['embedding']\
+          \ = item_encoder(**proccessed_items).detach().numpy().tolist()\n    user_embed_df['embedding']\
+          \ = user_encoder(**proccessed_users).detach().numpy().tolist()\n\n    #\
+          \ Add the currnet timestamp\n    item_embed_df['event_timestamp'] = datetime.now()\n\
+          \    user_embed_df['event_timestamp'] = datetime.now()\n\n    # Push the\
+          \ new embedding to the offline and online store\n    store.push('item_embed_push_source',\
           \ item_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)\n    store.push('user_embed_push_source',\
           \ user_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)\n\n   \
-          \ # Materilize the online store\n    store.materialize_incremental(datetime.now(),\
-          \ feature_views=['item_embedding', 'user_items', 'item_features'])\n\n \
-          \   # Calculate user recommendations for each user\n    item_embedding_view\
+          \ # Store the embedding of text features for search by text\n    item_text_features_embed\
+          \ = item_df[['item_id']].copy()\n    # item_text_features_embed['product_name']\
+          \ = proccessed_items['text_features'].detach()[:, 0, :].numpy().tolist()\n\
+          \    item_text_features_embed['about_product_embedding'] = proccessed_items['text_features'].detach()[:,\
+          \ 1, :].numpy().tolist()\n    item_text_features_embed['event_timestamp']\
+          \ = datetime.now()\n\n    store.push('item_textual_features_embed', item_text_features_embed,\
+          \ to=PushMode.ONLINE, allow_registry_cache=False)\n\n    # Materilize the\
+          \ online store\n    store.materialize_incremental(datetime.now(), feature_views=['item_embedding',\
+          \ 'user_items', 'item_features', 'item_textual_features_embed'])\n\n   \
+          \ # Calculate user recommendations for each user\n    item_embedding_view\
           \ = 'item_embedding'\n    k = 64\n    item_recommendation = []\n    for\
           \ user_embed in user_embed_df['embedding']:\n        item_recommendation.append(\n\
           \            store.retrieve_online_documents(\n                query=user_embed,\n\

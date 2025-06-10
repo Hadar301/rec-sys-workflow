@@ -55,7 +55,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     # load item and user dataframes
     item_df = pd.read_parquet(item_df_input.path)
     user_df = pd.read_parquet(user_df_input.path)
-    
+
     # Create a new table to be push to the online store
     item_embed_df = item_df[['item_id']].copy()
     user_embed_df = user_df[['user_id']].copy()
@@ -79,12 +79,14 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     
     # Store the embedding of text features for search by text
     item_text_features_embed = item_df[['item_id']].copy()
-    item_text_features_embed[''] = proccessed_items['text_features']
-    item_text_features_embed[''] = proccessed_items['text_features']
+    # item_text_features_embed['product_name'] = proccessed_items['text_features'].detach()[:, 0, :].numpy().tolist()
+    item_text_features_embed['about_product_embedding'] = proccessed_items['text_features'].detach()[:, 1, :].numpy().tolist()
+    item_text_features_embed['event_timestamp'] = datetime.now()
     
+    store.push('item_textual_features_embed', item_text_features_embed, to=PushMode.ONLINE, allow_registry_cache=False)
 
     # Materilize the online store
-    store.materialize_incremental(datetime.now(), feature_views=['item_embedding', 'user_items', 'item_features'])
+    store.materialize_incremental(datetime.now(), feature_views=['item_embedding', 'user_items', 'item_features', 'item_textual_features_embed'])
 
     # Calculate user recommendations for each user
     item_embedding_view = 'item_embedding'
