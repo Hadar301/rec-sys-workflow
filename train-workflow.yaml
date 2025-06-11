@@ -162,7 +162,7 @@ deploymentSpec:
           value: feast_edb_rec_sys
         - name: FEAST_REGISTRY_URL
           value: feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.41
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
     exec-load-data-from-feast:
       container:
         args:
@@ -243,7 +243,7 @@ deploymentSpec:
           value: feast_edb_rec_sys
         - name: FEAST_REGISTRY_URL
           value: feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.41
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
     exec-train-model:
       container:
         args:
@@ -283,7 +283,7 @@ deploymentSpec:
           \    item_output_model.metadata['framework'] = 'pytorch'\n    user_output_model.metadata['framework']\
           \ = 'pytorch'\n    with open(models_definition_output.path, 'w') as f:\n\
           \        json.dump(models_definition, f)\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.41
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
 pipelineInfo:
   name: train-workflow
 root:

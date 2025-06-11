@@ -4,7 +4,7 @@ import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model, Artifact
 
-IMAGE_TAG = '0.0.41'
+IMAGE_TAG = '0.0.42'
 BASE_IMAGE = os.getenv("BASE_REC_SYS_IMAGE", f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}")
 
 @dsl.component(base_image=BASE_IMAGE)
