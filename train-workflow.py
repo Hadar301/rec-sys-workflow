@@ -19,7 +19,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     import torch
     import subprocess
     import json
-    
+
     with open(models_definition_input.path, 'r') as f:
         models_definition :dict = json.load(f)
 
@@ -41,7 +41,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
         print(file.read())
 
     store = FeatureStore(repo_path="feature_repo/")
-    
+
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     device = torch.device('cpu')
     item_encoder = EntityTower(models_definition['items_num_numerical'], models_definition['items_num_categorical'])
@@ -76,13 +76,13 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     # Push the new embedding to the offline and online store
     store.push('item_embed_push_source', item_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)
     store.push('user_embed_push_source', user_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)
-    
+
     # Store the embedding of text features for search by text
     item_text_features_embed = item_df[['item_id']].copy()
     # item_text_features_embed['product_name'] = proccessed_items['text_features'].detach()[:, 0, :].numpy().tolist()
     item_text_features_embed['about_product_embedding'] = proccessed_items['text_features'].detach()[:, 1, :].numpy().tolist()
     item_text_features_embed['event_timestamp'] = datetime.now()
-    
+
     store.push('item_textual_features_embed', item_text_features_embed, to=PushMode.ONLINE, allow_registry_cache=False)
 
     # Materilize the online store
@@ -294,20 +294,20 @@ if __name__ == "__main__":
         package_path=pipeline_yaml
     )
 
-    # client = Client(
-    #   host=os.environ["DS_PIPELINE_URL"],
-    #   verify_ssl=False
-    # )
+    client = Client(
+      host=os.environ["DS_PIPELINE_URL"],
+      verify_ssl=False
+    )
 
-    # uploaded_pipeline = client.upload_pipeline(
-    #   pipeline_package_path=pipeline_yaml,
-    #   pipeline_name=os.environ["PIPELINE_NAME"]
-    # )
+    uploaded_pipeline = client.upload_pipeline(
+      pipeline_package_path=pipeline_yaml,
+      pipeline_name=os.environ["PIPELINE_NAME"]
+    )
 
-    # run = client.create_run_from_pipeline_package(
-    #   pipeline_file=pipeline_yaml,
-    #   arguments={},
-    #   run_name=os.environ["RUN_NAME"]
-    # )
+    run = client.create_run_from_pipeline_package(
+      pipeline_file=pipeline_yaml,
+      arguments={},
+      run_name=os.environ["RUN_NAME"]
+    )
 
-    # print(f"Pipeline submitted! Run ID: {run.run_id}")
+    print(f"Pipeline submitted! Run ID: {run.run_id}")
