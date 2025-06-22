@@ -249,7 +249,7 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
 def mount_secret_feast_repository(task):
     kubernetes.use_secret_as_env(
         task=task,
-        secret_name=os.getenv('DB_SECRET_NAME', 'pgvector'),
+        secret_name=os.getenv('DB_SECRET_NAME', 'cluster-sample-app'),
         secret_key_to_env={
             'uri': 'uri',
             'password': 'DB_PASSWORD',
