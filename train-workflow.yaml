@@ -159,9 +159,9 @@ deploymentSpec:
           \ to=PushMode.ONLINE, allow_registry_cache=False)\n\n"
         env:
         - name: FEAST_PROJECT_NAME
-          value: feast_edb_rec_sys
+          value: feast_rec_sys
         - name: FEAST_REGISTRY_URL
-          value: feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local
+          value: feast-feast-rec-sys-registry.rec-sys-test.svc.cluster.local
         image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
     exec-load-data-from-feast:
       container:
@@ -240,9 +240,9 @@ deploymentSpec:
           \n"
         env:
         - name: FEAST_PROJECT_NAME
-          value: feast_edb_rec_sys
+          value: feast_rec_sys
         - name: FEAST_REGISTRY_URL
-          value: feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local
+          value: feast-feast-rec-sys-registry.rec-sys-test.svc.cluster.local
         image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
     exec-train-model:
       container:
@@ -257,7 +257,8 @@ deploymentSpec:
         - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
-          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'minio' && \"\
           $0\" \"$@\"\n"
         - sh
         - -ec
@@ -274,15 +275,26 @@ deploymentSpec:
           \ interaction_df_input: Input[Dataset], item_output_model: Output[Model],\
           \ user_output_model: Output[Model], models_definition_output: Output[Artifact]):\n\
           \    from models.train_two_tower import create_and_train_two_tower\n   \
-          \ import pandas as pd\n    import torch\n    import json\n\n    item_df\
-          \ = pd.read_parquet(item_df_input.path)\n    user_df = pd.read_parquet(user_df_input.path)\n\
-          \    interaction_df = pd.read_parquet(interaction_df_input.path)\n\n   \
-          \ item_encoder, user_encoder, models_definition= create_and_train_two_tower(item_df,\
-          \ user_df, interaction_df, return_model_definition=True)\n\n    torch.save(item_encoder.state_dict(),\
+          \ import pandas as pd\n    import torch\n    import json\n    import os\n\
+          \    from minio import Minio\n\n    item_df = pd.read_parquet(item_df_input.path)\n\
+          \    user_df = pd.read_parquet(user_df_input.path)\n    interaction_df =\
+          \ pd.read_parquet(interaction_df_input.path)\n\n    item_encoder, user_encoder,\
+          \ models_definition= create_and_train_two_tower(item_df, user_df, interaction_df,\
+          \ return_model_definition=True)\n\n    torch.save(item_encoder.state_dict(),\
           \ item_output_model.path)\n    torch.save(user_encoder.state_dict(), user_output_model.path)\n\
           \    item_output_model.metadata['framework'] = 'pytorch'\n    user_output_model.metadata['framework']\
           \ = 'pytorch'\n    with open(models_definition_output.path, 'w') as f:\n\
-          \        json.dump(models_definition, f)\n\n"
+          \        json.dump(models_definition, f)\n\n    minio_client = Minio(\n\
+          \        endpoint=os.getenv('MINIO_HOST', \"endpoint\") + \\\n         \
+          \   ':' + os.getenv('MINIO_PORT', '9000'),\n        access_key=os.getenv('MINIO_ACCESS_KEY',\
+          \ \"access-key\"),\n        secret_key=os.getenv('MINIO_SECRET_KEY', \"\
+          secret-key\"),\n        secure=False  # Set to True if using HTTPS\n   \
+          \ )\n\n    # Step 3: Specify bucket and object details\n    bucket_name\
+          \ = \"user-encoder\"\n    object_name = \"user-encoder.pth\" \n\n    # Ensure\
+          \ the bucket exists, create it if it doesn't\n    if not minio_client.bucket_exists(bucket_name):\n\
+          \        minio_client.make_bucket(bucket_name)\n\n    minio_client.fput_object(\n\
+          \        bucket_name=bucket_name,\n        object_name=object_name,\n  \
+          \      file_path=user_output_model.path\n    )\n\n"
         image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
 pipelineInfo:
   name: train-workflow
@@ -370,11 +382,11 @@ platforms:
               secretKey: user
             - envVar: DB_PORT
               secretKey: port
-            secretName: cluster-sample-app
+            secretName: pgvector
           secretAsVolume:
           - mountPath: /app/feature_repo/secrets
             optional: false
-            secretName: feast-feast-edb-rec-sys-registry-tls
+            secretName: feast-feast-rec-sys-registry-tls
         exec-load-data-from-feast:
           secretAsEnv:
           - keyToEnv:
@@ -390,8 +402,22 @@ platforms:
               secretKey: user
             - envVar: DB_PORT
               secretKey: port
-            secretName: cluster-sample-app
+            secretName: pgvector
           secretAsVolume:
           - mountPath: /app/feature_repo/secrets
             optional: false
-            secretName: feast-feast-edb-rec-sys-registry-tls
+            secretName: feast-feast-rec-sys-registry-tls
+        exec-train-model:
+          secretAsEnv:
+          - keyToEnv:
+            - envVar: MINIO_HOST
+              secretKey: host
+            - envVar: MINIO_PORT
+              secretKey: port
+            - envVar: MINIO_ACCESS_KEY
+              secretKey: accesskey
+            - envVar: MINIO_SECRET_KEY
+              secretKey: secretkey
+            - envVar: MINIO_SECURE
+              secretKey: secure
+            secretName: ds-pipeline-s3-dspa

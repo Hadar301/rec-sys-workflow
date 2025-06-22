@@ -109,12 +109,14 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE, allow_registry_cache=False)
 
 
-@dsl.component(base_image=BASE_IMAGE)
+@dsl.component(base_image=BASE_IMAGE, packages_to_install=['minio'])
 def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], interaction_df_input: Input[Dataset], item_output_model: Output[Model], user_output_model: Output[Model], models_definition_output: Output[Artifact]):
     from models.train_two_tower import create_and_train_two_tower
     import pandas as pd
     import torch
     import json
+    import os
+    from minio import Minio
 
     item_df = pd.read_parquet(item_df_input.path)
     user_df = pd.read_parquet(user_df_input.path)
@@ -128,6 +130,29 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
     user_output_model.metadata['framework'] = 'pytorch'
     with open(models_definition_output.path, 'w') as f:
         json.dump(models_definition, f)
+    
+    minio_client = Minio(
+        endpoint=os.getenv('MINIO_HOST', "endpoint") + \
+            ':' + os.getenv('MINIO_PORT', '9000'),
+        access_key=os.getenv('MINIO_ACCESS_KEY', "access-key"),
+        secret_key=os.getenv('MINIO_SECRET_KEY', "secret-key"),
+        secure=False  # Set to True if using HTTPS
+    )
+    
+    # Step 3: Specify bucket and object details
+    bucket_name = "user-encoder"
+    object_name = "user-encoder.pth" 
+    
+    # Ensure the bucket exists, create it if it doesn't
+    if not minio_client.bucket_exists(bucket_name):
+        minio_client.make_bucket(bucket_name)
+
+    minio_client.fput_object(
+        bucket_name=bucket_name,
+        object_name=object_name,
+        file_path=user_output_model.path
+    )
+
 
 @dsl.component(base_image=BASE_IMAGE, packages_to_install=['psycopg2'])
 def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output[Dataset], interaction_df_output: Output[Dataset]):
@@ -224,7 +249,7 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
 def mount_secret_feast_repository(task):
     kubernetes.use_secret_as_env(
         task=task,
-        secret_name=os.getenv('DB_SECRET_NAME', 'cluster-sample-app'),
+        secret_name=os.getenv('DB_SECRET_NAME', 'pgvector'),
         secret_key_to_env={
             'uri': 'uri',
             'password': 'DB_PASSWORD',
@@ -256,6 +281,17 @@ def batch_recommendation():
         interaction_df_input=load_data_task.outputs['interaction_df_output'],
     ).after(load_data_task)
     train_model_task.set_caching_options(False)
+    kubernetes.use_secret_as_env(
+        task=train_model_task,
+        secret_name=os.getenv('MINIO_SECRET_NAME', 'ds-pipeline-s3-dspa'),
+        secret_key_to_env={
+            'host': 'MINIO_HOST',
+            'port': 'MINIO_PORT',
+            'accesskey': 'MINIO_ACCESS_KEY',
+            'secretkey': 'MINIO_SECRET_KEY',
+            'secure': 'MINIO_SECURE',
+        },
+    )
 
     generate_candidates_task = generate_candidates(
         item_input_model=train_model_task.outputs['item_output_model'],
