@@ -13,6 +13,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     from feast.data_source import PushMode
     from models.data_util import data_preproccess
     from models.entity_tower import EntityTower
+    from service.clip_encoder import ClipEncoder
     import pandas as pd
     import numpy as np
     from datetime import datetime
@@ -84,6 +85,11 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     item_text_features_embed['event_timestamp'] = datetime.now()
 
     store.push('item_textual_features_embed', item_text_features_embed, to=PushMode.ONLINE, allow_registry_cache=False)
+
+    # Store the embedding of clip features for search by image
+    clip_encoder = ClipEncoder()
+    item_clip_features_embed = clip_encoder.clip_embeddings(item_df)
+    store.push('item_clip_features_embed', item_clip_features_embed, to=PushMode.ONLINE, allow_registry_cache=False)
 
     # Materilize the online store
     store.materialize_incremental(datetime.now(), feature_views=['item_embedding', 'user_items', 'item_features', 'item_textual_features_embed'])
