@@ -159,9 +159,9 @@ deploymentSpec:
           \ to=PushMode.ONLINE, allow_registry_cache=False)\n\n"
         env:
         - name: FEAST_PROJECT_NAME
-          value: feast_rec_sys
+          value: feast_edb_rec_sys
         - name: FEAST_REGISTRY_URL
-          value: feast-feast-rec-sys-registry.rec-sys-test.svc.cluster.local
+          value: feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local
         image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
     exec-load-data-from-feast:
       container:
@@ -240,9 +240,9 @@ deploymentSpec:
           \n"
         env:
         - name: FEAST_PROJECT_NAME
-          value: feast_rec_sys
+          value: feast_edb_rec_sys
         - name: FEAST_REGISTRY_URL
-          value: feast-feast-rec-sys-registry.rec-sys-test.svc.cluster.local
+          value: feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local
         image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
     exec-train-model:
       container:
@@ -382,11 +382,11 @@ platforms:
               secretKey: user
             - envVar: DB_PORT
               secretKey: port
-            secretName: pgvector
+            secretName: cluster-sample-app
           secretAsVolume:
           - mountPath: /app/feature_repo/secrets
             optional: false
-            secretName: feast-feast-rec-sys-registry-tls
+            secretName: feast-feast-edb-rec-sys-registry-tls
         exec-load-data-from-feast:
           secretAsEnv:
           - keyToEnv:
@@ -402,11 +402,11 @@ platforms:
               secretKey: user
             - envVar: DB_PORT
               secretKey: port
-            secretName: pgvector
+            secretName: cluster-sample-app
           secretAsVolume:
           - mountPath: /app/feature_repo/secrets
             optional: false
-            secretName: feast-feast-rec-sys-registry-tls
+            secretName: feast-feast-edb-rec-sys-registry-tls
         exec-train-model:
           secretAsEnv:
           - keyToEnv:

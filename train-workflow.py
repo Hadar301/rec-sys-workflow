@@ -4,7 +4,7 @@ import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model, Artifact
 
-IMAGE_TAG = '0.0.42'
+IMAGE_TAG = '0.0.43'
 BASE_IMAGE = os.getenv("BASE_REC_SYS_IMAGE", f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}")
 
 @dsl.component(base_image=BASE_IMAGE)
@@ -145,9 +145,9 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
         secure=False  # Set to True if using HTTPS
     )
     
-    # Step 3: Specify bucket and object details
     bucket_name = "user-encoder"
     object_name = "user-encoder.pth" 
+    configuration = 'user-encoder-config.json'
     
     # Ensure the bucket exists, create it if it doesn't
     if not minio_client.bucket_exists(bucket_name):
@@ -157,6 +157,12 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
         bucket_name=bucket_name,
         object_name=object_name,
         file_path=user_output_model.path
+    )
+    # Save model configurations
+    minio_client.fput_object(
+        bucket_name=bucket_name,
+        object_name=configuration,
+        file_path=models_definition_output.path
     )
 
 
@@ -267,11 +273,11 @@ def mount_secret_feast_repository(task):
     )
     kubernetes.use_secret_as_volume(
         task=task,
-        secret_name=os.getenv("FEAST_SECRET_NAME", 'feast-feast-edb-rec-sys-registry-tls'),
+        secret_name=os.getenv("FEAST_SECRET_NAME", 'feast-feast-rec-sys-registry-tls'),
         mount_path='/app/feature_repo/secrets',
     )
-    task.set_env_variable(name="FEAST_PROJECT_NAME", value=os.getenv("FEAST_PROJECT_NAME", "feast_edb_rec_sys"))
-    task.set_env_variable(name="FEAST_REGISTRY_URL", value=os.getenv("FEAST_REGISTRY_URL", "feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local"))
+    task.set_env_variable(name="FEAST_PROJECT_NAME", value=os.getenv("FEAST_PROJECT_NAME", "feast_rec_sys"))
+    task.set_env_variable(name="FEAST_REGISTRY_URL", value=os.getenv("FEAST_REGISTRY_URL", "feast-feast-rec-sys-registry.rec-sys.svc.cluster.local"))
 
 @dsl.pipeline(name=os.path.basename(__file__).replace(".py", ""))
 def batch_recommendation():
