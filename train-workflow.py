@@ -200,9 +200,9 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
     user_service = store.get_feature_service("user_service")
     interaction_service = store.get_feature_service("interaction_service")
 
-    users_ids = pd.read_parquet('./feature_repo/data/recommendation_interactions.parquet')
-    user_ids = users_ids['user_id'].unique().tolist()
-    item_ids = users_ids['item_id'].unique().tolist()
+    interactions_ids = pd.read_parquet('./feature_repo/data/recommendation_interactions.parquet')
+    user_ids = interactions_ids['user_id'].unique().tolist()
+    item_ids = interactions_ids['item_id'].unique().tolist()
 
     # select which items to use for the training
     item_entity_df = pd.DataFrame.from_dict(
