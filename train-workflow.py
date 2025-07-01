@@ -219,7 +219,7 @@ def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output
         }
     )
     # Select which item-user interactions to use for the training
-    item_user_interactions_df = pd.read_parquet('./feature_repo/data/interactions_item_user_ids.parquet')
+    item_user_interactions_df = interactions_ids[['item_id', 'user_id']].copy()
     item_user_interactions_df['event_timestamp'] = datetime(2025, 1, 1)
 
     # retrive datasets for training

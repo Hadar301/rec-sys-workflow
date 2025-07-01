@@ -104,19 +104,20 @@ deploymentSpec:
           \ models_definition_input: Input[Artifact]):\n    from feast import FeatureStore\n\
           \    from feast.data_source import PushMode\n    from models.data_util import\
           \ data_preproccess\n    from models.entity_tower import EntityTower\n  \
-          \  import pandas as pd\n    import numpy as np\n    from datetime import\
-          \ datetime\n    import torch\n    import subprocess\n    import json\n\n\
-          \    with open(models_definition_input.path, 'r') as f:\n        models_definition\
-          \ :dict = json.load(f)\n\n    result = subprocess.run(\n        [\"/bin/bash\"\
-          , \"-c\", \"ls && ./entry_point.sh\"],\n        capture_output=True,  #\
-          \ Capture stdout and stderr\n        text=True,           # Return output\
-          \ as strings (not bytes)\n        # check=True           # Raise an error\
-          \ if the command fails\n    )\n\n    # Print the stdout\n    print(\"Standard\
-          \ Output:\")\n    print(result.stdout)\n\n    # Print the stderr (if any)\n\
-          \    print(\"Standard Error:\")\n    print(result.stderr)\n    with open('feature_repo/feature_store.yaml',\
-          \ 'r') as file:\n        print(file.read())\n\n    store = FeatureStore(repo_path=\"\
-          feature_repo/\")\n\n    # device = torch.device('cuda' if torch.cuda.is_available()\
-          \ else 'cpu')\n    device = torch.device('cpu')\n    item_encoder = EntityTower(models_definition['items_num_numerical'],\
+          \  from service.clip_encoder import ClipEncoder\n    import pandas as pd\n\
+          \    import numpy as np\n    from datetime import datetime\n    import torch\n\
+          \    import subprocess\n    import json\n\n    with open(models_definition_input.path,\
+          \ 'r') as f:\n        models_definition :dict = json.load(f)\n\n    result\
+          \ = subprocess.run(\n        [\"/bin/bash\", \"-c\", \"ls && ./entry_point.sh\"\
+          ],\n        capture_output=True,  # Capture stdout and stderr\n        text=True,\
+          \           # Return output as strings (not bytes)\n        # check=True\
+          \           # Raise an error if the command fails\n    )\n\n    # Print\
+          \ the stdout\n    print(\"Standard Output:\")\n    print(result.stdout)\n\
+          \n    # Print the stderr (if any)\n    print(\"Standard Error:\")\n    print(result.stderr)\n\
+          \    with open('feature_repo/feature_store.yaml', 'r') as file:\n      \
+          \  print(file.read())\n\n    store = FeatureStore(repo_path=\"feature_repo/\"\
+          )\n\n    # device = torch.device('cuda' if torch.cuda.is_available() else\
+          \ 'cpu')\n    device = torch.device('cpu')\n    item_encoder = EntityTower(models_definition['items_num_numerical'],\
           \ models_definition['items_num_categorical'])\n    user_encoder = EntityTower(models_definition['users_num_numerical'],\
           \ models_definition['users_num_categorical'])\n    item_encoder.load_state_dict(torch.load(item_input_model.path))\n\
           \    user_encoder.load_state_dict(torch.load(user_input_model.path))\n \
@@ -144,8 +145,12 @@ deploymentSpec:
           \    item_text_features_embed['about_product_embedding'] = proccessed_items['text_features'].detach()[:,\
           \ 1, :].numpy().tolist()\n    item_text_features_embed['event_timestamp']\
           \ = datetime.now()\n\n    store.push('item_textual_features_embed', item_text_features_embed,\
-          \ to=PushMode.ONLINE, allow_registry_cache=False)\n\n    # Materilize the\
-          \ online store\n    store.materialize_incremental(datetime.now(), feature_views=['item_embedding',\
+          \ to=PushMode.ONLINE, allow_registry_cache=False)\n\n    # Store the embedding\
+          \ of clip features for search by image\n    clip_encoder = ClipEncoder()\n\
+          \    item_clip_features_embed = clip_encoder.clip_embeddings(item_df)\n\
+          \    store.push('item_clip_features_embed', item_clip_features_embed, to=PushMode.ONLINE,\
+          \ allow_registry_cache=False)\n\n    # Materilize the online store\n   \
+          \ store.materialize_incremental(datetime.now(), feature_views=['item_embedding',\
           \ 'user_items', 'item_features', 'item_textual_features_embed'])\n\n   \
           \ # Calculate user recommendations for each user\n    item_embedding_view\
           \ = 'item_embedding'\n    k = 64\n    item_recommendation = []\n    for\
@@ -162,7 +167,7 @@ deploymentSpec:
           value: feast_edb_rec_sys
         - name: FEAST_REGISTRY_URL
           value: feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.43
     exec-load-data-from-feast:
       container:
         args:
@@ -206,20 +211,21 @@ deploymentSpec:
           \ load feature services\n    item_service = store.get_feature_service(\"\
           item_service\")\n    user_service = store.get_feature_service(\"user_service\"\
           )\n    interaction_service = store.get_feature_service(\"interaction_service\"\
-          )\n\n    users_ids = pd.read_parquet('./feature_repo/data/recommendation_interactions.parquet')\n\
-          \    user_ids = users_ids['user_id'].unique().tolist()\n    item_ids = users_ids['item_id'].unique().tolist()\n\
-          \n    # select which items to use for the training\n    item_entity_df =\
-          \ pd.DataFrame.from_dict(\n        {\n            'item_id': item_ids,\n\
-          \            'event_timestamp': [datetime(2025, 1, 1)] * len(item_ids)\n\
-          \        }\n    )\n    # select which users to use for the training\n  \
-          \  user_entity_df = pd.DataFrame.from_dict(\n        {\n            'user_id':\
-          \ user_ids,\n            'event_timestamp': [datetime(2025, 1, 1)] * len(user_ids)\n\
-          \        }\n    )\n    # Select which item-user interactions to use for\
-          \ the training\n    item_user_interactions_df = pd.read_parquet('./feature_repo/data/interactions_item_user_ids.parquet')\n\
-          \    item_user_interactions_df['event_timestamp'] = datetime(2025, 1, 1)\n\
-          \n    # retrive datasets for training\n    item_df = store.get_historical_features(entity_df=item_entity_df,\
-          \ features=item_service).to_df()\n    user_df = store.get_historical_features(entity_df=user_entity_df,\
-          \ features=user_service).to_df()\n    interaction_df = store.get_historical_features(entity_df=item_user_interactions_df,\
+          )\n\n    interactions_ids = pd.read_parquet('./feature_repo/data/recommendation_interactions.parquet')\n\
+          \    user_ids = interactions_ids['user_id'].unique().tolist()\n    item_ids\
+          \ = interactions_ids['item_id'].unique().tolist()\n\n    # select which\
+          \ items to use for the training\n    item_entity_df = pd.DataFrame.from_dict(\n\
+          \        {\n            'item_id': item_ids,\n            'event_timestamp':\
+          \ [datetime(2025, 1, 1)] * len(item_ids)\n        }\n    )\n    # select\
+          \ which users to use for the training\n    user_entity_df = pd.DataFrame.from_dict(\n\
+          \        {\n            'user_id': user_ids,\n            'event_timestamp':\
+          \ [datetime(2025, 1, 1)] * len(user_ids)\n        }\n    )\n    # Select\
+          \ which item-user interactions to use for the training\n    item_user_interactions_df\
+          \ = interactions_ids[['item_id', 'user_id']].copy()\n    item_user_interactions_df['event_timestamp']\
+          \ = datetime(2025, 1, 1)\n\n    # retrive datasets for training\n    item_df\
+          \ = store.get_historical_features(entity_df=item_entity_df, features=item_service).to_df()\n\
+          \    user_df = store.get_historical_features(entity_df=user_entity_df, features=user_service).to_df()\n\
+          \    interaction_df = store.get_historical_features(entity_df=item_user_interactions_df,\
           \ features=interaction_service).to_df()\n\n    uri = os.getenv('uri', None)\n\
           \    engine = create_engine(uri)\n\n    def table_exists(engine, table_name):\n\
           \        query = text(\"SELECT COUNT(*) FROM information_schema.tables WHERE\
@@ -240,10 +246,10 @@ deploymentSpec:
           \n"
         env:
         - name: FEAST_PROJECT_NAME
-          value: feast_edb_rec_sys
+          value: feast_rec_sys
         - name: FEAST_REGISTRY_URL
-          value: feast-feast-edb-rec-sys-registry.rec-sys.svc.cluster.local
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
+          value: feast-feast-rec-sys-registry.rec-sys.svc.cluster.local
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.43
     exec-train-model:
       container:
         args:
@@ -289,13 +295,16 @@ deploymentSpec:
           \   ':' + os.getenv('MINIO_PORT', '9000'),\n        access_key=os.getenv('MINIO_ACCESS_KEY',\
           \ \"access-key\"),\n        secret_key=os.getenv('MINIO_SECRET_KEY', \"\
           secret-key\"),\n        secure=False  # Set to True if using HTTPS\n   \
-          \ )\n\n    # Step 3: Specify bucket and object details\n    bucket_name\
-          \ = \"user-encoder\"\n    object_name = \"user-encoder.pth\" \n\n    # Ensure\
-          \ the bucket exists, create it if it doesn't\n    if not minio_client.bucket_exists(bucket_name):\n\
+          \ )\n\n    bucket_name = \"user-encoder\"\n    object_name = \"user-encoder.pth\"\
+          \ \n    configuration = 'user-encoder-config.json'\n\n    # Ensure the bucket\
+          \ exists, create it if it doesn't\n    if not minio_client.bucket_exists(bucket_name):\n\
           \        minio_client.make_bucket(bucket_name)\n\n    minio_client.fput_object(\n\
           \        bucket_name=bucket_name,\n        object_name=object_name,\n  \
-          \      file_path=user_output_model.path\n    )\n\n"
-        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.42
+          \      file_path=user_output_model.path\n    )\n    # Save model configurations\n\
+          \    minio_client.fput_object(\n        bucket_name=bucket_name,\n     \
+          \   object_name=configuration,\n        file_path=models_definition_output.path\n\
+          \    )\n\n"
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.43
 pipelineInfo:
   name: train-workflow
 root:
@@ -406,7 +415,7 @@ platforms:
           secretAsVolume:
           - mountPath: /app/feature_repo/secrets
             optional: false
-            secretName: feast-feast-edb-rec-sys-registry-tls
+            secretName: feast-feast-rec-sys-registry-tls
         exec-train-model:
           secretAsEnv:
           - keyToEnv:
