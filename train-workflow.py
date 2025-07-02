@@ -115,7 +115,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE, allow_registry_cache=False)
 
 
-@dsl.component(base_image=BASE_IMAGE, packages_to_install=['minio'])
+@dsl.component(base_image=BASE_IMAGE, packages_to_install=['minio', 'psycopg2'])
 def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], interaction_df_input: Input[Dataset], item_output_model: Output[Model], user_output_model: Output[Model], models_definition_output: Output[Artifact]):
     from models.train_two_tower import create_and_train_two_tower
     import pandas as pd
@@ -123,6 +123,8 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
     import json
     import os
     from minio import Minio
+    import psycopg2
+    from sqlalchemy import create_engine, text
 
     item_df = pd.read_parquet(item_df_input.path)
     user_df = pd.read_parquet(user_df_input.path)
@@ -137,6 +139,38 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
     with open(models_definition_output.path, 'w') as f:
         json.dump(models_definition, f)
     
+    # 
+    engine = create_engine(os.getenv('uri', None))
+    # Check if table exists
+    def table_exists(engine, table_name):
+        query = text("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = :table_name")
+        with engine.connect() as connection:
+            result = connection.execute(query, {"table_name": table_name}).scalar()
+            return result > 0
+
+    if not table_exists(engine, 'model_version'):
+        # Create table if it doesn't exist
+        with engine.connect() as connection:
+            connection.execute(text("""
+                CREATE TABLE model_version (
+                    id SERIAL PRIMARY KEY,
+                    version VARCHAR(50) NOT NULL, 
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """))
+            new_version = '1.0.0'
+            connection.execute(text(f"INSERT INTO model_version (version) VALUES ('{new_version}');"))
+            connection.commit()
+            
+    else:
+        # Get last version and increment minor version by 0.0.1
+        with engine.connect() as connection:
+            last_version = connection.execute(text("SELECT version FROM model_version ORDER BY id DESC LIMIT 1")).scalar()
+            major, minor, patch = map(int, last_version.split('.'))
+            new_version = f"{major}.{minor}.{patch + 1}"
+            connection.execute(text("UPDATE model_version SET version = :version WHERE id = (SELECT MAX(id) FROM model_version)"), {"version": new_version})
+            connection.commit()
+
     minio_client = Minio(
         endpoint=os.getenv('MINIO_HOST', "endpoint") + \
             ':' + os.getenv('MINIO_PORT', '9000'),
@@ -146,8 +180,8 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
     )
     
     bucket_name = "user-encoder"
-    object_name = "user-encoder.pth" 
-    configuration = 'user-encoder-config.json'
+    object_name = f"user-encoder-{new_version}.pth" 
+    configuration = f'user-encoder-config-{new_version}.json'
     
     # Ensure the bucket exists, create it if it doesn't
     if not minio_client.bucket_exists(bucket_name):
@@ -302,6 +336,13 @@ def batch_recommendation():
             'accesskey': 'MINIO_ACCESS_KEY',
             'secretkey': 'MINIO_SECRET_KEY',
             'secure': 'MINIO_SECURE',
+        },
+    )
+    kubernetes.use_secret_as_env(
+        task=train_model_task,
+        secret_name=os.getenv('DB_SECRET_NAME', 'cluster-sample-app'),
+        secret_key_to_env={
+            'uri': 'uri',
         },
     )
 
