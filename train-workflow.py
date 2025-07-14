@@ -1,5 +1,5 @@
 from kfp import dsl, compiler, Client
-from typing import List, Dict
+from typing import NamedTuple
 import os
 from kfp import kubernetes
 from kfp.dsl import Input, Output, Dataset, Model, Artifact
@@ -71,8 +71,9 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     user_embed_df['embedding'] = user_encoder(**proccessed_users).detach().numpy().tolist()
 
     # Add the currnet timestamp
-    item_embed_df['event_timestamp'] = datetime.now()
-    user_embed_df['event_timestamp'] = datetime.now()
+    current_time = datetime.now()
+    item_embed_df['event_timestamp'] = current_time
+    user_embed_df['event_timestamp'] = current_time
 
     # Push the new embedding to the offline and online store
     store.push('item_embed_push_source', item_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)
@@ -82,7 +83,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     item_text_features_embed = item_df[['item_id']].copy()
     # item_text_features_embed['product_name'] = proccessed_items['text_features'].detach()[:, 0, :].numpy().tolist()
     item_text_features_embed['about_product_embedding'] = proccessed_items['text_features'].detach()[:, 1, :].numpy().tolist()
-    item_text_features_embed['event_timestamp'] = datetime.now()
+    item_text_features_embed['event_timestamp'] = current_time
 
     store.push('item_textual_features_embed', item_text_features_embed, to=PushMode.ONLINE, allow_registry_cache=False)
 
@@ -92,7 +93,7 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
     store.push('item_clip_features_embed', item_clip_features_embed, to=PushMode.ONLINE, allow_registry_cache=False)
 
     # Materilize the online store
-    store.materialize_incremental(datetime.now(), feature_views=['item_embedding', 'user_items', 'item_features', 'item_textual_features_embed'])
+    store.materialize_incremental(current_time, feature_views=['item_embedding', 'user_items', 'item_features', 'item_textual_features_embed'])
 
     # Calculate user recommendations for each user
     item_embedding_view = 'item_embedding'
@@ -109,21 +110,26 @@ def generate_candidates(item_input_model: Input[Model], user_input_model: Input[
 
     # Pushing the calculated items to the online store
     user_items_df = user_embed_df[['user_id']].copy()
-    user_items_df['event_timestamp'] = datetime.now()
+    user_items_df['event_timestamp'] = current_time
     user_items_df['top_k_item_ids'] = item_recommendation
 
     store.push('user_items_push_source', user_items_df, to=PushMode.ONLINE, allow_registry_cache=False)
 
-
-@dsl.component(base_image=BASE_IMAGE, packages_to_install=['minio', 'psycopg2'])
-def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], interaction_df_input: Input[Dataset], item_output_model: Output[Model], user_output_model: Output[Model], models_definition_output: Output[Artifact]):
+@dsl.component(base_image=BASE_IMAGE, packages_to_install=['minio', 'psycopg2-binary'])
+def train_model(
+    item_df_input: Input[Dataset],
+    user_df_input: Input[Dataset],
+    interaction_df_input: Input[Dataset],
+    item_output_model: Output[Model],
+    user_output_model: Output[Model],
+    models_definition_output: Output[Artifact]
+) -> NamedTuple('modelMetadata', [('bucket_name', str), ('new_version', str), ('object_name', str), ('torch_version', str)]):
     from models.train_two_tower import create_and_train_two_tower
     import pandas as pd
     import torch
     import json
     import os
     from minio import Minio
-    import psycopg2
     from sqlalchemy import create_engine, text
 
     item_df = pd.read_parquet(item_df_input.path)
@@ -161,7 +167,6 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
             new_version = '1.0.0'
             connection.execute(text(f"INSERT INTO model_version (version) VALUES ('{new_version}');"))
             connection.commit()
-            
     else:
         # Get last version and increment minor version by 0.0.1
         with engine.connect() as connection:
@@ -198,15 +203,58 @@ def train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset], in
         object_name=configuration,
         file_path=models_definition_output.path
     )
+    modelMetadata = NamedTuple('modelMetadata', [('bucket_name', str), ('new_version', str), ('object_name', str), ('torch_version', str)])
+    return modelMetadata(bucket_name, new_version, object_name, torch.__version__[0:5])
 
+@dsl.component(base_image="quay.io/rh-ee-ofridman/model-registry-python-oc")
+def fetch_api_credentials() -> NamedTuple('ocContext', [('author', str), ('user_token', str), ('host', str)]):
+    import os, subprocess
+    from typing import NamedTuple
+    
+    author_value = subprocess.run("oc whoami", shell=True, capture_output=True, text=True, check=True).stdout.strip()
+    user_token_value = subprocess.run("oc whoami -t", shell=True, capture_output=True, text=True, check=True).stdout.strip()
 
-@dsl.component(base_image=BASE_IMAGE, packages_to_install=['psycopg2'])
+    mr_namespace = os.getenv("MODEL_REGISTRY_NAMESPACE","rhoai-model-registries")
+    mr_container = os.getenv("MODEL_REGISTRY_CONTAINER","modelregistry-sample")
+
+    cmd = f"oc get svc {mr_container} -n {mr_namespace} -o json | jq '.metadata.annotations.\"routing.opendatahub.io/external-address-rest\"'"
+    host_output = subprocess.run(cmd, shell=True, capture_output=True, text=True, check=True).stdout.strip()
+    host_value = f"https://{host_output[1:-5]}" # Remove quotes and :443
+    
+    ocContext = NamedTuple('ocContext', [('author', str), ('user_token', str), ('host', str)])
+    return ocContext(author_value, user_token_value, host_value)
+
+@dsl.component(base_image=BASE_IMAGE, packages_to_install=['model_registry'])
+def create_model_registry(
+    author: str,
+    user_token: str,
+    host: str,
+    bucket_name: str,
+    new_version: str,
+    object_name: str,
+    torch_version: str
+):
+    import os
+    from model_registry import ModelRegistry, utils
+
+    registry = ModelRegistry(host, author=author, user_token=user_token)
+    model_endpoint= f"http://{os.environ.get('MINIO_HOST', 'endpoint')}:{os.environ.get('MINIO_PORT', '9000')}"
+
+    registry.register_model(
+                name="item-encoder",
+                uri=utils.s3_uri_from(endpoint=model_endpoint, bucket=bucket_name, path=object_name, region=os.environ.get("REGION", "us-east-1")),
+                version=new_version,
+                model_format_name="pytocrch",
+                model_format_version=torch_version,
+                storage_key= "minio",
+            )
+
+@dsl.component(base_image=BASE_IMAGE, packages_to_install=['psycopg2-binary'])
 def load_data_from_feast(item_df_output: Output[Dataset], user_df_output: Output[Dataset], interaction_df_output: Output[Dataset]):
     from feast import FeatureStore
     from datetime import datetime
     import pandas as pd
     import os
-    import psycopg2
     from sqlalchemy import create_engine, text
     import subprocess
 
@@ -311,7 +359,7 @@ def mount_secret_feast_repository(task):
         mount_path='/app/feature_repo/secrets',
     )
     task.set_env_variable(name="FEAST_PROJECT_NAME", value=os.getenv("FEAST_PROJECT_NAME", "feast_rec_sys"))
-    task.set_env_variable(name="FEAST_REGISTRY_URL", value=os.getenv("FEAST_REGISTRY_URL", "feast-feast-rec-sys-registry.rec-sys.svc.cluster.local"))
+    task.set_env_variable(name="FEAST_REGISTRY_URL", value=os.getenv("FEAST_REGISTRY_URL", f"feast-feast-rec-sys-registry.rec-sys-{os.getenv("USER","")}.svc.cluster.local"))
 
 @dsl.pipeline(name=os.path.basename(__file__).replace(".py", ""))
 def batch_recommendation():
@@ -320,6 +368,10 @@ def batch_recommendation():
     mount_secret_feast_repository(load_data_task)
     # Component configurations
     load_data_task.set_caching_options(False)
+
+    fetch_api_credentials_task = fetch_api_credentials()
+    fetch_api_credentials_task.set_env_variable(name="MODEL_REGISTRY_NAMESPACE", value=os.getenv("MODEL_REGISTRY_NAMESPACE"))
+    fetch_api_credentials_task.set_env_variable(name="MODEL_REGISTRY_CONTAINER", value=os.getenv("MODEL_REGISTRY_CONTAINER"))
 
     train_model_task = train_model(
         item_df_input=load_data_task.outputs['item_df_output'],
@@ -343,6 +395,25 @@ def batch_recommendation():
         secret_name=os.getenv('DB_SECRET_NAME', 'cluster-sample-app'),
         secret_key_to_env={
             'uri': 'uri',
+        },
+    )
+
+    create_model_registry_task = create_model_registry(
+        author=fetch_api_credentials_task.outputs['author'],
+        user_token=fetch_api_credentials_task.outputs['user_token'],
+        host=fetch_api_credentials_task.outputs['host'],
+        bucket_name=train_model_task.outputs['bucket_name'],
+        new_version=train_model_task.outputs['new_version'],
+        object_name=train_model_task.outputs['object_name'],
+        torch_version=train_model_task.outputs['torch_version'],
+    ).after(train_model_task, fetch_api_credentials_task)
+    create_model_registry_task.set_caching_options(False)
+    kubernetes.use_secret_as_env(
+        task=create_model_registry_task,
+        secret_name=os.getenv('MINIO_SECRET_NAME', 'ds-pipeline-s3-dspa'),
+        secret_key_to_env={
+            'host': 'MINIO_HOST',
+            'port': 'MINIO_PORT',
         },
     )
 
