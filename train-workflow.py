@@ -380,7 +380,7 @@ def load_data_from_feast(
 
     import pandas as pd
     from feast import FeatureStore
-    from service.dataset_provider import LocalDatasetProvider
+    from service.dataset_provider import LocalDatasetProvider, RemoteDatasetProvider
     from sqlalchemy import create_engine, text
 
     result = subprocess.run(
@@ -402,7 +402,16 @@ def load_data_from_feast(
     store = FeatureStore(repo_path="feature_repo/")
     store.refresh_registry()
     print("registry refreshed")
-    dataset_provider = LocalDatasetProvider(store)
+
+    dataset_url = os.getenv("DATASET_URL")
+    print("DATASET_URL:", dataset_url)
+    if dataset_url is not None and dataset_url != '':
+        print("using custom remote dataset")
+        # with force_load true, to align the parquet files
+        dataset_provider = RemoteDatasetProvider(dataset_url, force_load=True)
+    else:
+        print("using pre generated dataset")
+        dataset_provider = LocalDatasetProvider(store)
 
     # retrieve datasets for training
     item_df = dataset_provider.item_df()
@@ -475,7 +484,12 @@ def mount_secret_feast_repository(task):
             "feast-feast-rec-sys-registry.rec-sys.svc.cluster.local",
         ),
     )
-
+    dataset_url = os.getenv("DATASET_URL")
+    if dataset_url is not None:
+        task.set_env_variable(
+            name="DATASET_URL",
+            value=dataset_url
+        )
 
 @dsl.pipeline(name=os.path.basename(__file__).replace(".py", ""))
 def batch_recommendation():
