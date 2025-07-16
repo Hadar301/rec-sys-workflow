@@ -207,7 +207,7 @@ def train_model(
     return modelMetadata(bucket_name, new_version, object_name, torch.__version__[0:5])
 
 @dsl.component(base_image="quay.io/rh-ee-ofridman/model-registry-python-oc")
-def fetch_api_credentials() -> NamedTuple('ocContext', [('author', str), ('user_token', str), ('host', str)]):
+def fetch_cluster_credentials() -> NamedTuple('ocContext', [('author', str), ('user_token', str), ('host', str)]):
     import os, subprocess
     from typing import NamedTuple
     
@@ -225,7 +225,7 @@ def fetch_api_credentials() -> NamedTuple('ocContext', [('author', str), ('user_
     return ocContext(author_value, user_token_value, host_value)
 
 @dsl.component(base_image=BASE_IMAGE, packages_to_install=['model_registry'])
-def create_model_registry(
+def registry_model_to_model_registry(
     author: str,
     user_token: str,
     host: str,
@@ -236,15 +236,20 @@ def create_model_registry(
 ):
     import os
     from model_registry import ModelRegistry, utils
-
+    from datetime import datetime
+    
     registry = ModelRegistry(host, author=author, user_token=user_token)
-    model_endpoint= f"http://{os.environ.get('MINIO_HOST', 'endpoint')}:{os.environ.get('MINIO_PORT', '9000')}"
-
+    # Use DNS with the namespace 'rhoai-model-registries'
+    model_endpoint = f"https://{host}:{os.environ.get('MINIO_PORT')}"
+    
     registry.register_model(
                 name="item-encoder",
                 uri=utils.s3_uri_from(endpoint=model_endpoint, bucket=bucket_name, path=object_name, region=os.environ.get("REGION", "us-east-1")),
-                version=new_version,
-                model_format_name="pytocrch",
+                version=(
+                    f"{new_version}_"
+                    f"{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}"
+                ),
+                model_format_name="pytorch",
                 model_format_version=torch_version,
                 storage_key= "minio",
             )
@@ -334,7 +339,7 @@ def mount_secret_feast_repository(task):
         mount_path='/app/feature_repo/secrets',
     )
     task.set_env_variable(name="FEAST_PROJECT_NAME", value=os.getenv("FEAST_PROJECT_NAME", "feast_rec_sys"))
-    task.set_env_variable(name="FEAST_REGISTRY_URL", value=os.getenv("FEAST_REGISTRY_URL", f"feast-feast-rec-sys-registry.rec-sys-{os.getenv("USER","")}.svc.cluster.local"))
+    task.set_env_variable(name="FEAST_REGISTRY_URL", value=os.getenv("FEAST_REGISTRY_URL", "feast-feast-rec-sys-registry.rec-sys.svc.cluster.local"))
 
 @dsl.pipeline(name=os.path.basename(__file__).replace(".py", ""))
 def batch_recommendation():
@@ -344,7 +349,7 @@ def batch_recommendation():
     # Component configurations
     load_data_task.set_caching_options(False)
 
-    fetch_api_credentials_task = fetch_api_credentials()
+    fetch_api_credentials_task = fetch_cluster_credentials()
     fetch_api_credentials_task.set_env_variable(name="MODEL_REGISTRY_NAMESPACE", value=os.getenv("MODEL_REGISTRY_NAMESPACE"))
     fetch_api_credentials_task.set_env_variable(name="MODEL_REGISTRY_CONTAINER", value=os.getenv("MODEL_REGISTRY_CONTAINER"))
 
@@ -373,7 +378,7 @@ def batch_recommendation():
         },
     )
 
-    create_model_registry_task = create_model_registry(
+    create_model_registry_task = registry_model_to_model_registry(
         author=fetch_api_credentials_task.outputs['author'],
         user_token=fetch_api_credentials_task.outputs['user_token'],
         host=fetch_api_credentials_task.outputs['host'],
