@@ -4,9 +4,8 @@ from typing import NamedTuple
 from kfp import Client, compiler, dsl, kubernetes
 from kfp.dsl import Artifact, Dataset, Input, Model, Output
 
-IMAGE_TAG = "0.0.43"
 BASE_IMAGE = os.getenv(
-    "BASE_REC_SYS_IMAGE", f"quay.io/ecosystem-appeng/rec-sys-app:{IMAGE_TAG}"
+    "BASE_REC_SYS_IMAGE", "quay.io/ecosystem-appeng/rec-sys-app:0.0.43"
 )
 
 
@@ -27,9 +26,9 @@ def generate_candidates(
     import torch
     from feast import FeatureStore
     from feast.data_source import PushMode
-    from models.data_util import data_preproccess
-    from models.entity_tower import EntityTower
-    from service.clip_encoder import ClipEncoder
+    from recsysapp.models.data_util import data_preproccess
+    from recsysapp.models.entity_tower import EntityTower
+    from recsysapp.service.clip_encoder import ClipEncoder
 
     with open(models_definition_input.path, "r") as f:
         models_definition: dict = json.load(f)
@@ -48,10 +47,10 @@ def generate_candidates(
     # Print the stderr (if any)
     print("Standard Error:")
     print(result.stderr)
-    with open("feature_repo/feature_store.yaml", "r") as file:
+    with open("recsysapp/feature_repo/feature_store.yaml", "r") as file:
         print(file.read())
 
-    store = FeatureStore(repo_path="feature_repo/")
+    store = FeatureStore(repo_path="recsysapp/feature_repo/")
 
     # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     device = torch.device("cpu")
@@ -200,7 +199,7 @@ def train_model(
     import pandas as pd
     import torch
     from minio import Minio
-    from models.train_two_tower import create_and_train_two_tower
+    from recsysapp.models.train_two_tower import create_and_train_two_tower
     from sqlalchemy import create_engine, text
 
     item_df = pd.read_parquet(item_df_input.path)
@@ -380,7 +379,7 @@ def load_data_from_feast(
 
     import pandas as pd
     from feast import FeatureStore
-    from service.dataset_provider import LocalDatasetProvider
+    from recsysapp.service.dataset_provider import LocalDatasetProvider
     from sqlalchemy import create_engine, text
 
     result = subprocess.run(
@@ -397,9 +396,9 @@ def load_data_from_feast(
     print("Standard Error:")
     print(result.stderr)
 
-    with open("feature_repo/feature_store.yaml", "r") as file:
+    with open("recsysapp/feature_repo/feature_store.yaml", "r") as file:
         print(file.read())
-    store = FeatureStore(repo_path="feature_repo/")
+    store = FeatureStore(repo_path="recsysapp/feature_repo/")
     store.refresh_registry()
     print("registry refreshed")
     dataset_provider = LocalDatasetProvider(store)
