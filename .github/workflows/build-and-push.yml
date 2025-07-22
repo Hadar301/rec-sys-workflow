@@ -42,6 +42,6 @@ jobs:
           context: ${{ matrix.context }}
           file: Containerfile
           push: true
-          tags: quay.io/ecosystem-appeng/${{ matrix.image-name }}:${{ steps.version.outputs.tag }}
+          tags: quay.io/rh-ai-kickstart/${{ matrix.image-name }}:${{ steps.version.outputs.tag }}
           build-args: |
             IMAGE_TAG=${{ steps.version.outputs.tag }}
