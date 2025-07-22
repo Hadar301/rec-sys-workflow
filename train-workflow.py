@@ -379,7 +379,7 @@ def load_data_from_feast(
 
     import pandas as pd
     from feast import FeatureStore
-    from recsysapp.service.dataset_provider import LocalDatasetProvider
+    from recsysapp.service.dataset_provider import LocalDatasetProvider, RemoteDatasetProvider
     from sqlalchemy import create_engine, text
 
     result = subprocess.run(
