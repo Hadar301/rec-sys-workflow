@@ -598,10 +598,14 @@ if __name__ == "__main__":
     )
 
     client = Client(host=os.environ["DS_PIPELINE_URL"], verify_ssl=False)
-
-    uploaded_pipeline = client.upload_pipeline(
-        pipeline_package_path=pipeline_yaml, pipeline_name=os.environ["PIPELINE_NAME"]
-    )
+    
+    pipelines = client.list_pipelines().pipelines
+    pipeline_name = os.environ["PIPELINE_NAME"]
+    pipeline_exists = any(p.display_name == pipeline_name for p in pipelines)
+    if not pipeline_exists:
+        uploaded_pipeline = client.upload_pipeline(
+            pipeline_package_path=pipeline_yaml, pipeline_name=pipeline_name
+        )
 
     run = client.create_run_from_pipeline_package(
         pipeline_file=pipeline_yaml, arguments={}, run_name=os.environ["RUN_NAME"]

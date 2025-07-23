@@ -1,6 +1,34 @@
 # PIPELINE DEFINITION
 # Name: train-workflow
 components:
+  comp-create-model-registry:
+    executorLabel: exec-create-model-registry
+    inputDefinitions:
+      parameters:
+        author:
+          parameterType: STRING
+        bucket_name:
+          parameterType: STRING
+        host:
+          parameterType: STRING
+        new_version:
+          parameterType: STRING
+        object_name:
+          parameterType: STRING
+        torch_version:
+          parameterType: STRING
+        user_token:
+          parameterType: STRING
+  comp-fetch-api-credentials:
+    executorLabel: exec-fetch-api-credentials
+    outputDefinitions:
+      parameters:
+        author:
+          parameterType: STRING
+        host:
+          parameterType: STRING
+        user_token:
+          parameterType: STRING
   comp-generate-candidates:
     executorLabel: exec-generate-candidates
     inputDefinitions:
@@ -71,8 +99,102 @@ components:
           artifactType:
             schemaTitle: system.Model
             schemaVersion: 0.0.1
+      parameters:
+        bucket_name:
+          parameterType: STRING
+        new_version:
+          parameterType: STRING
+        object_name:
+          parameterType: STRING
+        torch_version:
+          parameterType: STRING
 deploymentSpec:
   executors:
+    exec-create-model-registry:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - create_model_registry
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'model_registry'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef create_model_registry(\n    author: str,\n    user_token: str,\n\
+          \    host: str,\n    bucket_name: str,\n    new_version: str,\n    object_name:\
+          \ str,\n    torch_version: str\n):\n    import os\n    from model_registry\
+          \ import ModelRegistry, utils\n\n    registry = ModelRegistry(host, author=author,\
+          \ user_token=user_token)\n    # Use DNS with the namespace 'rhoai-model-registries'\n\
+          \    model_endpoint = f\"http://minio.rhoai-model-registries.svc.cluster.local:{os.environ.get('MINIO_PORT',\
+          \ '9000')}\"\n\n    registry.register_model(\n                name=\"item-encoder\"\
+          ,\n                uri=utils.s3_uri_from(endpoint=model_endpoint, bucket=bucket_name,\
+          \ path=object_name, region=os.environ.get(\"REGION\", \"us-east-1\")),\n\
+          \                version=new_version,\n                model_format_name=\"\
+          pytorch\",\n                model_format_version=torch_version,\n      \
+          \          storage_key= \"minio\",\n            )\n\n"
+        image: quay.io/ecosystem-appeng/rec-sys-app:0.0.43
+    exec-fetch-api-credentials:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - fetch_api_credentials
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef fetch_api_credentials() -> NamedTuple('ocContext', [('author',\
+          \ str), ('user_token', str), ('host', str)]):\n    import os, subprocess\n\
+          \    from typing import NamedTuple\n\n    author_value = subprocess.run(\"\
+          oc whoami\", shell=True, capture_output=True, text=True, check=True).stdout.strip()\n\
+          \    user_token_value = subprocess.run(\"oc whoami -t\", shell=True, capture_output=True,\
+          \ text=True, check=True).stdout.strip()\n\n    mr_namespace = os.getenv(\"\
+          MODEL_REGISTRY_NAMESPACE\",\"rhoai-model-registries\")\n    mr_container\
+          \ = os.getenv(\"MODEL_REGISTRY_CONTAINER\",\"modelregistry-sample\")\n\n\
+          \    cmd = f\"oc get svc {mr_container} -n {mr_namespace} -o json | jq '.metadata.annotations.\\\
+          \"routing.opendatahub.io/external-address-rest\\\"'\"\n    host_output =\
+          \ subprocess.run(cmd, shell=True, capture_output=True, text=True, check=True).stdout.strip()\n\
+          \    host_value = f\"https://{host_output[1:-5]}\" # Remove quotes and :443\n\
+          \n    ocContext = NamedTuple('ocContext', [('author', str), ('user_token',\
+          \ str), ('host', str)])\n    return ocContext(author_value, user_token_value,\
+          \ host_value)\n\n"
+        env:
+        - name: MODEL_REGISTRY_NAMESPACE
+        - name: MODEL_REGISTRY_CONTAINER
+        image: quay.io/rh-ee-ofridman/model-registry-python-oc
     exec-generate-candidates:
       container:
         args:
@@ -134,9 +256,9 @@ deploymentSpec:
           \ else value for key, value in proccessed_users.items()}\n    item_embed_df['embedding']\
           \ = item_encoder(**proccessed_items).detach().numpy().tolist()\n    user_embed_df['embedding']\
           \ = user_encoder(**proccessed_users).detach().numpy().tolist()\n\n    #\
-          \ Add the currnet timestamp\n    item_embed_df['event_timestamp'] = datetime.now()\n\
-          \    user_embed_df['event_timestamp'] = datetime.now()\n\n    # Push the\
-          \ new embedding to the offline and online store\n    store.push('item_embed_push_source',\
+          \ Add the currnet timestamp\n    current_time = datetime.now()\n    item_embed_df['event_timestamp']\
+          \ = current_time\n    user_embed_df['event_timestamp'] = current_time\n\n\
+          \    # Push the new embedding to the offline and online store\n    store.push('item_embed_push_source',\
           \ item_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)\n    store.push('user_embed_push_source',\
           \ user_embed_df, to=PushMode.ONLINE, allow_registry_cache=False)\n\n   \
           \ # Store the embedding of text features for search by text\n    item_text_features_embed\
@@ -144,13 +266,13 @@ deploymentSpec:
           \ = proccessed_items['text_features'].detach()[:, 0, :].numpy().tolist()\n\
           \    item_text_features_embed['about_product_embedding'] = proccessed_items['text_features'].detach()[:,\
           \ 1, :].numpy().tolist()\n    item_text_features_embed['event_timestamp']\
-          \ = datetime.now()\n\n    store.push('item_textual_features_embed', item_text_features_embed,\
+          \ = current_time\n\n    store.push('item_textual_features_embed', item_text_features_embed,\
           \ to=PushMode.ONLINE, allow_registry_cache=False)\n\n    # Store the embedding\
           \ of clip features for search by image\n    clip_encoder = ClipEncoder()\n\
           \    item_clip_features_embed = clip_encoder.clip_embeddings(item_df)\n\
           \    store.push('item_clip_features_embed', item_clip_features_embed, to=PushMode.ONLINE,\
           \ allow_registry_cache=False)\n\n    # Materilize the online store\n   \
-          \ store.materialize_incremental(datetime.now(), feature_views=['item_embedding',\
+          \ store.materialize_incremental(current_time, feature_views=['item_embedding',\
           \ 'user_items', 'item_features', 'item_textual_features_embed'])\n\n   \
           \ # Calculate user recommendations for each user\n    item_embedding_view\
           \ = 'item_embedding'\n    k = 64\n    item_recommendation = []\n    for\
@@ -159,7 +281,7 @@ deploymentSpec:
           \                top_k=k,\n                features=[f'{item_embedding_view}:item_id']\n\
           \            ).to_df()['item_id'].to_list()\n        )\n\n    # Pushing\
           \ the calculated items to the online store\n    user_items_df = user_embed_df[['user_id']].copy()\n\
-          \    user_items_df['event_timestamp'] = datetime.now()\n    user_items_df['top_k_item_ids']\
+          \    user_items_df['event_timestamp'] = current_time\n    user_items_df['top_k_item_ids']\
           \ = item_recommendation\n\n    store.push('user_items_push_source', user_items_df,\
           \ to=PushMode.ONLINE, allow_registry_cache=False)\n\n"
         env:
@@ -182,8 +304,8 @@ deploymentSpec:
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'psycopg2' &&\
-          \ \"$0\" \"$@\"\n"
+          \  python3 -m pip install --quiet --no-warn-script-location 'psycopg2-binary'\
+          \ && \"$0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -197,9 +319,9 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef load_data_from_feast(item_df_output: Output[Dataset], user_df_output:\
           \ Output[Dataset], interaction_df_output: Output[Dataset]):\n    from feast\
-          \ import FeatureStore\n    from datetime import datetime\n    import pandas\
-          \ as pd\n    import os\n    import psycopg2\n    from sqlalchemy import\
-          \ create_engine, text\n    import subprocess\n\n    result = subprocess.run(\n\
+          \ import FeatureStore\n    import pandas as pd\n    import os\n    from\
+          \ service.dataset_provider import LocalDatasetProvider\n    from sqlalchemy\
+          \ import create_engine, text\n    import subprocess\n\n    result = subprocess.run(\n\
           \        [\"/bin/bash\", \"-c\", \"ls && ./entry_point.sh\"],\n        capture_output=True,\
           \  # Capture stdout and stderr\n        text=True,           # Return output\
           \ as strings (not bytes)\n    )\n\n    # Print the stdout\n    print(\"\
@@ -207,29 +329,13 @@ deploymentSpec:
           \ (if any)\n    print(\"Standard Error:\")\n    print(result.stderr)\n\n\
           \    with open('feature_repo/feature_store.yaml', 'r') as file:\n      \
           \  print(file.read())\n    store = FeatureStore(repo_path=\"feature_repo/\"\
-          )\n    store.refresh_registry()\n    print('registry refreshed')\n    #\
-          \ load feature services\n    item_service = store.get_feature_service(\"\
-          item_service\")\n    user_service = store.get_feature_service(\"user_service\"\
-          )\n    interaction_service = store.get_feature_service(\"interaction_service\"\
-          )\n\n    interactions_ids = pd.read_parquet('./feature_repo/data/recommendation_interactions.parquet')\n\
-          \    user_ids = interactions_ids['user_id'].unique().tolist()\n    item_ids\
-          \ = interactions_ids['item_id'].unique().tolist()\n\n    # select which\
-          \ items to use for the training\n    item_entity_df = pd.DataFrame.from_dict(\n\
-          \        {\n            'item_id': item_ids,\n            'event_timestamp':\
-          \ [datetime(2025, 1, 1)] * len(item_ids)\n        }\n    )\n    # select\
-          \ which users to use for the training\n    user_entity_df = pd.DataFrame.from_dict(\n\
-          \        {\n            'user_id': user_ids,\n            'event_timestamp':\
-          \ [datetime(2025, 1, 1)] * len(user_ids)\n        }\n    )\n    # Select\
-          \ which item-user interactions to use for the training\n    item_user_interactions_df\
-          \ = interactions_ids[['item_id', 'user_id']].copy()\n    item_user_interactions_df['event_timestamp']\
-          \ = datetime(2025, 1, 1)\n\n    # retrive datasets for training\n    item_df\
-          \ = store.get_historical_features(entity_df=item_entity_df, features=item_service).to_df()\n\
-          \    user_df = store.get_historical_features(entity_df=user_entity_df, features=user_service).to_df()\n\
-          \    interaction_df = store.get_historical_features(entity_df=item_user_interactions_df,\
-          \ features=interaction_service).to_df()\n\n    uri = os.getenv('uri', None)\n\
-          \    engine = create_engine(uri)\n\n    def table_exists(engine, table_name):\n\
-          \        query = text(\"SELECT COUNT(*) FROM information_schema.tables WHERE\
-          \ table_name = :table_name\")\n        with engine.connect() as connection:\n\
+          )\n    store.refresh_registry()\n    print('registry refreshed')\n    dataset_provider\
+          \ = LocalDatasetProvider(store)\n\n    # retrieve datasets for training\n\
+          \    item_df = dataset_provider.item_df()\n    user_df = dataset_provider.user_df()\n\
+          \    interaction_df = dataset_provider.interaction_df()\n\n    uri = os.getenv('uri',\
+          \ None)\n    engine = create_engine(uri)\n\n    def table_exists(engine,\
+          \ table_name):\n        query = text(\"SELECT COUNT(*) FROM information_schema.tables\
+          \ WHERE table_name = :table_name\")\n        with engine.connect() as connection:\n\
           \            result = connection.execute(query, {\"table_name\": table_name}).scalar()\n\
           \            return result > 0\n\n    if table_exists(engine, 'new_users'):\n\
           \        query_new_users = 'SELECT * FROM new_users'\n        stream_users_df\
@@ -264,8 +370,8 @@ deploymentSpec:
           \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
           \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.11.0'\
           \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
-          \  python3 -m pip install --quiet --no-warn-script-location 'minio' && \"\
-          $0\" \"$@\"\n"
+          \  python3 -m pip install --quiet --no-warn-script-location 'minio' 'psycopg2-binary'\
+          \ && \"$0\" \"$@\"\n"
         - sh
         - -ec
         - 'program_path=$(mktemp -d)
@@ -277,39 +383,111 @@ deploymentSpec:
 
           '
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
-          \ *\n\ndef train_model(item_df_input: Input[Dataset], user_df_input: Input[Dataset],\
-          \ interaction_df_input: Input[Dataset], item_output_model: Output[Model],\
-          \ user_output_model: Output[Model], models_definition_output: Output[Artifact]):\n\
+          \ *\n\ndef train_model(\n    item_df_input: Input[Dataset],\n    user_df_input:\
+          \ Input[Dataset],\n    interaction_df_input: Input[Dataset],\n    item_output_model:\
+          \ Output[Model],\n    user_output_model: Output[Model],\n    models_definition_output:\
+          \ Output[Artifact]\n) -> NamedTuple('modelMetadata', [('bucket_name', str),\
+          \ ('new_version', str), ('object_name', str), ('torch_version', str)]):\n\
           \    from models.train_two_tower import create_and_train_two_tower\n   \
           \ import pandas as pd\n    import torch\n    import json\n    import os\n\
-          \    from minio import Minio\n\n    item_df = pd.read_parquet(item_df_input.path)\n\
-          \    user_df = pd.read_parquet(user_df_input.path)\n    interaction_df =\
-          \ pd.read_parquet(interaction_df_input.path)\n\n    item_encoder, user_encoder,\
-          \ models_definition= create_and_train_two_tower(item_df, user_df, interaction_df,\
-          \ return_model_definition=True)\n\n    torch.save(item_encoder.state_dict(),\
+          \    from minio import Minio\n    from sqlalchemy import create_engine,\
+          \ text\n\n    item_df = pd.read_parquet(item_df_input.path)\n    user_df\
+          \ = pd.read_parquet(user_df_input.path)\n    interaction_df = pd.read_parquet(interaction_df_input.path)\n\
+          \n    item_encoder, user_encoder, models_definition= create_and_train_two_tower(item_df,\
+          \ user_df, interaction_df, return_model_definition=True)\n\n    torch.save(item_encoder.state_dict(),\
           \ item_output_model.path)\n    torch.save(user_encoder.state_dict(), user_output_model.path)\n\
           \    item_output_model.metadata['framework'] = 'pytorch'\n    user_output_model.metadata['framework']\
           \ = 'pytorch'\n    with open(models_definition_output.path, 'w') as f:\n\
-          \        json.dump(models_definition, f)\n\n    minio_client = Minio(\n\
-          \        endpoint=os.getenv('MINIO_HOST', \"endpoint\") + \\\n         \
-          \   ':' + os.getenv('MINIO_PORT', '9000'),\n        access_key=os.getenv('MINIO_ACCESS_KEY',\
-          \ \"access-key\"),\n        secret_key=os.getenv('MINIO_SECRET_KEY', \"\
-          secret-key\"),\n        secure=False  # Set to True if using HTTPS\n   \
-          \ )\n\n    bucket_name = \"user-encoder\"\n    object_name = \"user-encoder.pth\"\
-          \ \n    configuration = 'user-encoder-config.json'\n\n    # Ensure the bucket\
-          \ exists, create it if it doesn't\n    if not minio_client.bucket_exists(bucket_name):\n\
+          \        json.dump(models_definition, f)\n\n    # \n    engine = create_engine(os.getenv('uri',\
+          \ None))\n    # Check if table exists\n    def table_exists(engine, table_name):\n\
+          \        query = text(\"SELECT COUNT(*) FROM information_schema.tables WHERE\
+          \ table_name = :table_name\")\n        with engine.connect() as connection:\n\
+          \            result = connection.execute(query, {\"table_name\": table_name}).scalar()\n\
+          \            return result > 0\n\n    if not table_exists(engine, 'model_version'):\n\
+          \        # Create table if it doesn't exist\n        with engine.connect()\
+          \ as connection:\n            connection.execute(text(\"\"\"\n         \
+          \       CREATE TABLE model_version (\n                    id SERIAL PRIMARY\
+          \ KEY,\n                    version VARCHAR(50) NOT NULL, \n           \
+          \         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n             \
+          \   );\n            \"\"\"))\n            new_version = '1.0.0'\n      \
+          \      connection.execute(text(f\"INSERT INTO model_version (version) VALUES\
+          \ ('{new_version}');\"))\n            connection.commit()\n    else:\n \
+          \       # Get last version and increment minor version by 0.0.1\n      \
+          \  with engine.connect() as connection:\n            last_version = connection.execute(text(\"\
+          SELECT version FROM model_version ORDER BY id DESC LIMIT 1\")).scalar()\n\
+          \            major, minor, patch = map(int, last_version.split('.'))\n \
+          \           new_version = f\"{major}.{minor}.{patch + 1}\"\n           \
+          \ connection.execute(text(\"UPDATE model_version SET version = :version\
+          \ WHERE id = (SELECT MAX(id) FROM model_version)\"), {\"version\": new_version})\n\
+          \            connection.commit()\n\n    minio_client = Minio(\n        endpoint=os.getenv('MINIO_HOST',\
+          \ \"endpoint\") + \\\n            ':' + os.getenv('MINIO_PORT', '9000'),\n\
+          \        access_key=os.getenv('MINIO_ACCESS_KEY', \"access-key\"),\n   \
+          \     secret_key=os.getenv('MINIO_SECRET_KEY', \"secret-key\"),\n      \
+          \  secure=False  # Set to True if using HTTPS\n    )\n\n    bucket_name\
+          \ = \"user-encoder\"\n    object_name = f\"user-encoder-{new_version}.pth\"\
+          \ \n    configuration = f'user-encoder-config-{new_version}.json'\n\n  \
+          \  # Ensure the bucket exists, create it if it doesn't\n    if not minio_client.bucket_exists(bucket_name):\n\
           \        minio_client.make_bucket(bucket_name)\n\n    minio_client.fput_object(\n\
           \        bucket_name=bucket_name,\n        object_name=object_name,\n  \
           \      file_path=user_output_model.path\n    )\n    # Save model configurations\n\
           \    minio_client.fput_object(\n        bucket_name=bucket_name,\n     \
           \   object_name=configuration,\n        file_path=models_definition_output.path\n\
-          \    )\n\n"
+          \    )\n    modelMetadata = NamedTuple('modelMetadata', [('bucket_name',\
+          \ str), ('new_version', str), ('object_name', str), ('torch_version', str)])\n\
+          \    return modelMetadata(bucket_name, new_version, object_name, torch.__version__[0:5])\n\
+          \n"
         image: quay.io/ecosystem-appeng/rec-sys-app:0.0.43
 pipelineInfo:
   name: train-workflow
 root:
   dag:
     tasks:
+      create-model-registry:
+        cachingOptions: {}
+        componentRef:
+          name: comp-create-model-registry
+        dependentTasks:
+        - fetch-api-credentials
+        - train-model
+        inputs:
+          parameters:
+            author:
+              taskOutputParameter:
+                outputParameterKey: author
+                producerTask: fetch-api-credentials
+            bucket_name:
+              taskOutputParameter:
+                outputParameterKey: bucket_name
+                producerTask: train-model
+            host:
+              taskOutputParameter:
+                outputParameterKey: host
+                producerTask: fetch-api-credentials
+            new_version:
+              taskOutputParameter:
+                outputParameterKey: new_version
+                producerTask: train-model
+            object_name:
+              taskOutputParameter:
+                outputParameterKey: object_name
+                producerTask: train-model
+            torch_version:
+              taskOutputParameter:
+                outputParameterKey: torch_version
+                producerTask: train-model
+            user_token:
+              taskOutputParameter:
+                outputParameterKey: user_token
+                producerTask: fetch-api-credentials
+        taskInfo:
+          name: create-model-registry
+      fetch-api-credentials:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-fetch-api-credentials
+        taskInfo:
+          name: fetch-api-credentials
       generate-candidates:
         cachingOptions: {}
         componentRef:
@@ -376,6 +554,14 @@ platforms:
   kubernetes:
     deploymentSpec:
       executors:
+        exec-create-model-registry:
+          secretAsEnv:
+          - keyToEnv:
+            - envVar: MINIO_HOST
+              secretKey: host
+            - envVar: MINIO_PORT
+              secretKey: port
+            secretName: ds-pipeline-s3-dspa
         exec-generate-candidates:
           secretAsEnv:
           - keyToEnv:
@@ -430,3 +616,7 @@ platforms:
             - envVar: MINIO_SECURE
               secretKey: secure
             secretName: ds-pipeline-s3-dspa
+          - keyToEnv:
+            - envVar: uri
+              secretKey: uri
+            secretName: cluster-sample-app
