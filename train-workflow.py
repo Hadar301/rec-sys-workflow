@@ -601,7 +601,7 @@ if __name__ == "__main__":
     
     pipelines = client.list_pipelines().pipelines
     pipeline_name = os.environ["PIPELINE_NAME"]
-    pipeline_exists = any(p.display_name == pipeline_name for p in pipelines)
+    pipeline_exists = False if pipelines is None else any(p.display_name == pipeline_name for p in pipelines)
     if not pipeline_exists:
         uploaded_pipeline = client.upload_pipeline(
             pipeline_package_path=pipeline_yaml, pipeline_name=pipeline_name
