@@ -21,7 +21,6 @@ def generate_candidates(
     import subprocess
     from datetime import datetime
 
-    import numpy as np
     import pandas as pd
     import torch
     from feast import FeatureStore
@@ -81,11 +80,11 @@ def generate_candidates(
     proccessed_users = data_preproccess(user_df)
     # Move tensors to device
     proccessed_items = {
-        key: value.to(device) if type(value) == torch.Tensor else value
+        key: value.to(device) if isinstance(value, torch.Tensor) else value
         for key, value in proccessed_items.items()
     }
     proccessed_users = {
-        key: value.to(device) if type(value) == torch.Tensor else value
+        key: value.to(device) if isinstance(value, torch.Tensor) else value
         for key, value in proccessed_users.items()
     }
     item_embed_df["embedding"] = (
@@ -116,7 +115,12 @@ def generate_candidates(
 
     # Store the embedding of text features for search by text
     item_text_features_embed = item_df[["item_id"]].copy()
-    # item_text_features_embed['product_name'] = proccessed_items['text_features'].detach()[:, 0, :].numpy().tolist()
+    # item_text_features_embed["product_name"] = (
+    #    proccessed_items["text_features"].detach()[:, 0, :].numpy().tolist()
+    # )
+    item_text_features_embed["product_name"] = (
+        proccessed_items["text_features"].detach()[:, 0, :].numpy().tolist()
+    )
     item_text_features_embed["about_product_embedding"] = (
         proccessed_items["text_features"].detach()[:, 1, :].numpy().tolist()
     )
@@ -223,7 +227,8 @@ def train_model(
     # Check if table exists
     def table_exists(engine, table_name):
         query = text(
-            "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = :table_name"
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_name = :table_name"
         )
         with engine.connect() as connection:
             result = connection.execute(query, {"table_name": table_name}).scalar()
@@ -237,7 +242,7 @@ def train_model(
                     """
                 CREATE TABLE model_version (
                     id SERIAL PRIMARY KEY,
-                    version VARCHAR(50) NOT NULL, 
+                    version VARCHAR(50) NOT NULL,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """
@@ -245,7 +250,9 @@ def train_model(
             )
             new_version = "1.0.0"
             connection.execute(
-                text(f"INSERT INTO model_version (version) VALUES ('{new_version}');")
+                text(
+                    f"INSERT INTO model_version (version) VALUES " f"('{new_version}');"
+                )
             )
             connection.commit()
     else:
@@ -258,7 +265,8 @@ def train_model(
             new_version = f"{major}.{minor}.{patch + 1}"
             connection.execute(
                 text(
-                    "UPDATE model_version SET version = :version WHERE id = (SELECT MAX(id) FROM model_version)"
+                    "UPDATE model_version SET version = :version "
+                    "WHERE id = (SELECT MAX(id) FROM model_version)"
                 ),
                 {"version": new_version},
             )
@@ -322,7 +330,10 @@ def fetch_cluster_credentials() -> (
     mr_namespace = os.getenv("MODEL_REGISTRY_NAMESPACE", "rhoai-model-registries")
     mr_container = os.getenv("MODEL_REGISTRY_CONTAINER", "modelregistry-sample")
 
-    cmd = f"oc get svc {mr_container} -n {mr_namespace} -o json | jq '.metadata.annotations.\"routing.opendatahub.io/external-address-rest\"'"
+    cmd = (
+        f"oc get svc {mr_container} -n {mr_namespace} -o json | "
+        f"jq '.metadata.annotations.\"routing.opendatahub.io/external-address-rest\"'"
+    )
     host_output = subprocess.run(
         cmd, shell=True, capture_output=True, text=True, check=True
     ).stdout.strip()
@@ -379,7 +390,10 @@ def load_data_from_feast(
 
     import pandas as pd
     from feast import FeatureStore
-    from recsysapp.service.dataset_provider import LocalDatasetProvider, RemoteDatasetProvider
+    from recsysapp.service.dataset_provider import (
+        LocalDatasetProvider,
+        RemoteDatasetProvider,
+    )
     from sqlalchemy import create_engine, text
 
     result = subprocess.run(
@@ -404,7 +418,7 @@ def load_data_from_feast(
 
     dataset_url = os.getenv("DATASET_URL")
     print("DATASET_URL:", dataset_url)
-    if dataset_url is not None and dataset_url != '':
+    if dataset_url is not None and dataset_url != "":
         print("using custom remote dataset")
         # with force_load true, to align the parquet files
         dataset_provider = RemoteDatasetProvider(dataset_url, force_load=True)
@@ -489,6 +503,7 @@ def mount_secret_feast_repository(task):
             name="DATASET_URL",
             value=dataset_url
         )
+
 
 @dsl.pipeline(name=os.path.basename(__file__).replace(".py", ""))
 def batch_recommendation():
@@ -598,10 +613,14 @@ if __name__ == "__main__":
     )
 
     client = Client(host=os.environ["DS_PIPELINE_URL"], verify_ssl=False)
-    
+
     pipelines = client.list_pipelines().pipelines
     pipeline_name = os.environ["PIPELINE_NAME"]
-    pipeline_exists = False if pipelines is None else any(p.display_name == pipeline_name for p in pipelines)
+    pipeline_exists = (
+        False
+        if pipelines is None
+        else any(p.display_name == pipeline_name for p in pipelines)
+    )
     if not pipeline_exists:
         uploaded_pipeline = client.upload_pipeline(
             pipeline_package_path=pipeline_yaml, pipeline_name=pipeline_name
