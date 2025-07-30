@@ -32,7 +32,7 @@ This image is used by the `fetch_cluster_credentials()` function in `train-workf
 # From the oc-tools/ directory
 podman build --platform linux/amd64 -t quay.io/ecosystem-appeng/model-registry .  
 # Push to registry
-podman push quay.io/rh-ee-ofridman/model-registry-python-oc
+podman push quay.io/ecosystem-appeng/model-registry:latest
 ```
 
 ## Why Separate from Base Image?
