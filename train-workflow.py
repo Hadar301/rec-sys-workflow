@@ -250,9 +250,7 @@ def train_model(
             )
             new_version = "1.0.0"
             connection.execute(
-                text(
-                    f"INSERT INTO model_version (version) VALUES " f"('{new_version}');"
-                )
+                text(f"INSERT INTO model_version (version) VALUES ('{new_version}');")
             )
             connection.commit()
     else:
@@ -313,8 +311,8 @@ def train_model(
 
 
 @dsl.component(base_image="quay.io/ecosystem-appeng/model-registry:latest")
-def fetch_cluster_credentials() -> (
-    NamedTuple("ocContext", [("author", str), ("user_token", str), ("host", str)])
+def fetch_cluster_credentials() -> NamedTuple(
+    "ocContext", [("author", str), ("user_token", str), ("host", str)]
 ):
     import os
     import subprocess
@@ -372,7 +370,7 @@ def registry_model_to_model_registry(
             path=object_name,
             region=os.environ.get("REGION", "us-east-1"),
         ),
-        version=(f"{new_version}_" f"{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}"),
+        version=(f"{new_version}_{datetime.now().strftime('%Y_%m_%d_%H_%M_%S')}"),
         model_format_name="pytorch",
         model_format_version=torch_version,
         storage_key="minio",
@@ -499,15 +497,11 @@ def mount_secret_feast_repository(task):
     )
     dataset_url = os.getenv("DATASET_URL")
     if dataset_url is not None:
-        task.set_env_variable(
-            name="DATASET_URL",
-            value=dataset_url
-        )
+        task.set_env_variable(name="DATASET_URL", value=dataset_url)
 
 
 @dsl.pipeline(name=os.path.basename(__file__).replace(".py", ""))
 def batch_recommendation():
-
     load_data_task = load_data_from_feast()
     mount_secret_feast_repository(load_data_task)
     # Component configurations
