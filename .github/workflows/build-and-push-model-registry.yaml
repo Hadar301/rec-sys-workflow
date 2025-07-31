@@ -40,7 +40,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ${{ matrix.context }}
-          file: Containerfile
+          file: ${{ matrix.context }}/Containerfile
           push: true
           tags: |
             quay.io/rh-ai-kickstart/${{ matrix.image-name }}:${{ steps.version.outputs.tag }}
