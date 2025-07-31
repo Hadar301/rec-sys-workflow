@@ -5,7 +5,7 @@ from kfp import Client, compiler, dsl, kubernetes
 from kfp.dsl import Artifact, Dataset, Input, Model, Output
 
 BASE_IMAGE = os.getenv(
-    "BASE_REC_SYS_IMAGE", "quay.io/ecosystem-appeng/rec-sys-app:latest"
+    "BASE_REC_SYS_IMAGE", "quay.io/rh-ai-kickstart/rec-sys-app:latest"
 )
 
 
@@ -310,7 +310,7 @@ def train_model(
     return modelMetadata(bucket_name, new_version, object_name, torch.__version__[0:5])
 
 
-@dsl.component(base_image="quay.io/ecosystem-appeng/model-registry:latest")
+@dsl.component(base_image="quay.io/rh-ai-kickstart/rec-sys-model-registry:latest")
 def fetch_cluster_credentials() -> NamedTuple(
     "ocContext", [("author", str), ("user_token", str), ("host", str)]
 ):
