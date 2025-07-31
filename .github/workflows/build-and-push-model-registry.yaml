@@ -1,4 +1,4 @@
-name: Build and push - pipeline image
+name: Build and push - model registry image
 
 on:
   workflow_dispatch:
@@ -13,9 +13,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: rec-sys-workflow
-            context: .
-            image-name: rec-sys-workflow
+          - name: rec-sys-model-registry
+            context: oc-tools
+            image-name: rec-sys-model-registry
 
     steps:
       - name: Checkout repository
