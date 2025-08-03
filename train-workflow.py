@@ -3,6 +3,9 @@ from typing import NamedTuple
 
 from kfp import Client, compiler, dsl, kubernetes
 from kfp.dsl import Artifact, Dataset, Input, Model, Output
+import logging
+
+logger = logging.getLogger(__name__)
 
 BASE_IMAGE = os.getenv(
     "BASE_REC_SYS_IMAGE", "quay.io/rh-ai-kickstart/rec-sys-app:latest"
@@ -28,6 +31,9 @@ def generate_candidates(
     from recsysapp.models.data_util import data_preproccess
     from recsysapp.models.entity_tower import EntityTower
     from recsysapp.service.clip_encoder import ClipEncoder
+    import logging
+
+    logger = logging.getLogger(__name__)
 
     with open(models_definition_input.path, "r") as f:
         models_definition: dict = json.load(f)
@@ -39,15 +45,15 @@ def generate_candidates(
         # check=True           # Raise an error if the command fails
     )
 
-    # Print the stdout
-    print("Standard Output:")
-    print(result.stdout)
+    # logger.info the stdout
+    logger.info("Standard Output:")
+    logger.info(result.stdout)
 
-    # Print the stderr (if any)
-    print("Standard Error:")
-    print(result.stderr)
+    # logger.info the stderr (if any)
+    logger.info("Standard Error:")
+    logger.info(result.stderr)
     with open("recsysapp/feature_repo/feature_store.yaml", "r") as file:
-        print(file.read())
+        logger.info(file.read())
 
     store = FeatureStore(repo_path="recsysapp/feature_repo/")
 
@@ -205,6 +211,9 @@ def train_model(
     from minio import Minio
     from recsysapp.models.train_two_tower import create_and_train_two_tower
     from sqlalchemy import create_engine, text
+    import logging
+
+    logger = logging.getLogger(__name__)
 
     item_df = pd.read_parquet(item_df_input.path)
     user_df = pd.read_parquet(user_df_input.path)
@@ -393,6 +402,11 @@ def load_data_from_feast(
         RemoteDatasetProvider,
     )
     from sqlalchemy import create_engine, text
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    logger.info("Starting load_data_from_feast")
 
     result = subprocess.run(
         ["/bin/bash", "-c", "ls && ./entry_point.sh"],
@@ -400,28 +414,28 @@ def load_data_from_feast(
         text=True,  # Return output as strings (not bytes)
     )
 
-    # Print the stdout
-    print("Standard Output:")
-    print(result.stdout)
+    # logger.info the stdout
+    logger.info("Standard Output:")
+    logger.info(result.stdout)
 
-    # Print the stderr (if any)
-    print("Standard Error:")
-    print(result.stderr)
+    # logger.info the stderr (if any)
+    logger.info("Standard Error:")
+    logger.info(result.stderr)
 
     with open("recsysapp/feature_repo/feature_store.yaml", "r") as file:
-        print(file.read())
+        logger.info(file.read())
     store = FeatureStore(repo_path="recsysapp/feature_repo/")
     store.refresh_registry()
-    print("registry refreshed")
+    logger.info("registry refreshed")
 
     dataset_url = os.getenv("DATASET_URL")
-    print("DATASET_URL:", dataset_url)
+    logger.info("DATASET_URL:", dataset_url)
     if dataset_url is not None and dataset_url != "":
-        print("using custom remote dataset")
+        logger.info("using custom remote dataset")
         # with force_load true, to align the parquet files
         dataset_provider = RemoteDatasetProvider(dataset_url, force_load=True)
     else:
-        print("using pre generated dataset")
+        logger.info("using pre generated dataset")
         dataset_provider = LocalDatasetProvider(store)
 
     # retrieve datasets for training
@@ -457,9 +471,15 @@ def load_data_from_feast(
         interaction_df = pd.concat([interaction_df, stream_positive_inter_df], axis=0)
 
     # Pass artifacts
+    logger.info("Saving artifacts to parquet files")
     item_df.to_parquet(item_df_output.path)
     user_df.to_parquet(user_df_output.path)
+    logger.info(f"num of interactions: {len(interaction_df)}")
+    interaction_df = interaction_df.head(5000)
     interaction_df.to_parquet(interaction_df_output.path)
+    logger.info(
+        f"Saved {len(item_df)} items for {len(user_df)} users with {len(interaction_df)} interactions"
+    )
 
     item_df_output.metadata["format"] = "parquet"
     user_df_output.metadata["format"] = "parquet"
@@ -624,4 +644,4 @@ if __name__ == "__main__":
         pipeline_file=pipeline_yaml, arguments={}, run_name=os.environ["RUN_NAME"]
     )
 
-    print(f"Pipeline submitted! Run ID: {run.run_id}")
+    logger.info(f"Pipeline submitted! Run ID: {run.run_id}")
